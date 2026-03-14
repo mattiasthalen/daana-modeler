@@ -59,9 +59,13 @@ Links to:
 
 One-liner: "This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details."
 
+## CLAUDE.md Changes
+
+CLAUDE.md currently contains "How to Test", "Repository Structure", and "Documentation" sections that overlap with the README. Since CLAUDE.md is an agent-facing file and README is human-facing, CLAUDE.md will be trimmed to agent-only instructions (project description, repo structure for context, and any agent-specific guidance). Human-facing content like installation steps and external doc links moves to the README.
+
 ## What's NOT Included
 
 - No contributor guide or CONTRIBUTING.md (audience is users, not contributors)
 - No changelog
-- No CI/CD badge (no CI configured)
+- No CI/CD badge (`.github/` only contains dependabot config, no workflows)
 - No logo or banner image
