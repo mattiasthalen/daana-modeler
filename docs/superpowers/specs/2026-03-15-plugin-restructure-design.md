@@ -4,7 +4,7 @@ Restructure daana-modeler from a loose collection of skills into a proper Claude
 
 ## Context
 
-daana-modeler currently has skills under `skills/` at the repo root but lacks a `.claude-plugin/plugin.json` manifest, so Claude Code cannot discover it as a plugin. The skills are named `daana-model`, `daana-mapping`, and `daana-query`, with an orchestrator at `skills/daana/` that routes between them. Two skills have `disable-model-invocation: true`, preventing Claude from invoking them via the Skill tool — which breaks inter-skill handovers.
+daana-modeler currently has skills under `skills/` at the repo root but lacks a `.claude-plugin/plugin.json` manifest, so Claude Code cannot discover it as a plugin. The skills are named `daana-model`, `daana-mapping`, and `daana-query`, with an orchestrator at `skills/daana/` that routes between them. All three skills and the orchestrator have `disable-model-invocation: true`, preventing Claude from invoking them via the Skill tool — which breaks inter-skill handovers.
 
 ## Goals
 
@@ -37,7 +37,20 @@ daana-modeler/
 ├── README.md
 ├── LICENSE
 └── .devcontainer/
+├── .claude/
+│   └── settings.json
+├── .devcontainer/
+├── docs/
+│   └── superpowers/
+│       ├── specs/
+│       └── plans/
 ```
+
+### What's unchanged
+
+- `.claude/settings.json` — project-level Claude Code settings (superpowers plugin config).
+- `.devcontainer/` — dev container configuration.
+- `docs/` — design specs and implementation plans.
 
 ### What's removed
 
@@ -70,13 +83,17 @@ daana-modeler/
 }
 ```
 
-No custom component paths are needed. The `skills/` directory is the default discovery location and will be auto-discovered. The `references/` directory is not a plugin component — skills read its files directly via file paths.
+No custom component paths are needed. The `skills/` directory is the default discovery location and will be auto-discovered. The `references/` directory is not a plugin component — skills read its files directly via paths relative to the plugin root (e.g., `references/model-schema.md`). When installed via `claude plugin add`, the entire plugin directory is cached locally and relative paths resolve from the plugin root.
 
 ## Skill Changes
 
 ### Frontmatter changes (all skills)
 
-- Remove `disable-model-invocation: true` from `model` and `map` skills. This fixes issues #5 and #6, allowing Claude to invoke these skills via the Skill tool for handovers.
+- Remove `disable-model-invocation: true` from all three skills (`model`, `map`, and `query`). This fixes issues #5 and #6, and ensures all skills can be invoked via the Skill tool for handovers. The orchestrator's flag goes away with its deletion.
+
+### Inline slash command references (all skills)
+
+- Update all inline references to old skill names within SKILL.md files. For example, `query/SKILL.md` currently references `/daana-model` and `/daana-mapping` — these must become `/daana:model` and `/daana:map`. Scan all three skill files for stale `/daana-*` references and update them.
 
 ### Reference path updates (model and map skills)
 
@@ -84,7 +101,12 @@ No custom component paths are needed. The `skills/` directory is the default dis
 
 ### Source schema parsing (model and map skills)
 
-- Add guidance to both `model` and `map` skills: "If the user provides a source schema file, read `references/source-schema-formats.md` and parse it." This replaces the orchestrator's pre-parsing role. Each skill uses the parsed data for its own purpose — `model` for entity/attribute hints, `map` for table/column matching.
+The orchestrator currently asks "Do you have a source schema to work from?" in its Step 1 before routing, and pre-parses the schema for downstream skills. Both `model` and `map` skills have a "Source Schema Context" section that says "If the orchestrator (`/daana`) parsed a source schema before invoking this skill..." — this framing becomes invalid.
+
+Replace the "Source Schema Context" section in both skills to make each self-sufficient:
+
+- **`model/SKILL.md`** — In Phase 1 (Detection & Setup), after detecting existing model state, ask: "Do you have a source schema file (Swagger/OpenAPI, OData, or dlt) to work from?" If yes, read `references/source-schema-formats.md`, detect the format, parse it, and use the extracted tables/columns/types as hints during the entity interview.
+- **`map/SKILL.md`** — In Phase 1 (Entity Selection), after listing unmapped entities, ask: "Do you have a source schema file to work from?" If yes, read `references/source-schema-formats.md`, parse it, and use the extracted table/column information to accelerate column-to-attribute matching.
 
 ### Handover sections
 
@@ -95,6 +117,8 @@ Add a wrap-up/handover section at the end of each skill:
 **`map/SKILL.md`**: After writing a mapping file, offer to continue with another unmapped entity or hand over to `/daana:query` to explore the data.
 
 **`query/SKILL.md`**: If unmapped entities are detected, suggest `/daana:map` to set up mappings.
+
+Handovers are user-confirmed offers, not automatic redirects. This is a behavioral change from the orchestrator's auto-chain logic (which automatically returned to its routing loop after each sub-skill completed). The new approach gives users explicit control over the next step.
 
 ### Skill instructions
 
@@ -112,6 +136,7 @@ The core interview flows, validation rules, and behavioral instructions within e
 - Change subtitle from "A Claude Code skill" to "A Claude Code plugin".
 - Update usage section: replace `/daana` with `/daana:model`, `/daana:map`, `/daana:query`.
 - Add brief description of each skill's purpose.
+- Remove the "As a local skill: Copy the `skills/daana/` directory..." fallback instruction — it no longer applies with the new structure.
 - Installation command remains `claude plugin add` (already correct).
 
 ## Issues Resolved
