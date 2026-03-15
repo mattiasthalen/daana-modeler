@@ -14,16 +14,14 @@ ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519 <<< y > /dev/null
 KEY_TITLE="$(basename "$PWD")"
 
 # Delete existing authentication keys with matching title
-gh api /user/keys --jq ".[] | select(.title == \"$KEY_TITLE\") | .id" | \
-  while read -r key_id; do
-    gh api -X DELETE "/user/keys/$key_id"
-  done
+while read -r key_id; do
+  gh api -X DELETE "/user/keys/$key_id"
+done < <(gh api /user/keys --jq ".[] | select(.title == \"$KEY_TITLE\") | .id")
 
 # Delete existing signing keys with matching title
-gh api /user/ssh_signing_keys --jq ".[] | select(.title == \"$KEY_TITLE (signing)\") | .id" | \
-  while read -r key_id; do
-    gh api -X DELETE "/user/ssh_signing_keys/$key_id"
-  done
+while read -r key_id; do
+  gh api -X DELETE "/user/ssh_signing_keys/$key_id"
+done < <(gh api /user/ssh_signing_keys --jq ".[] | select(.title == \"$KEY_TITLE (signing)\") | .id")
 
 # Add new keys to GitHub
 gh ssh-key add ~/.ssh/id_ed25519.pub --type authentication --title "$KEY_TITLE"
@@ -33,7 +31,12 @@ gh ssh-key add ~/.ssh/id_ed25519.pub --type signing --title "$KEY_TITLE (signing
 name="$(gh api user -q .name)"
 email="$(gh api user -q .email)"
 
-# Validate email is not null (private email setting)
+# Validate name and email
+if [[ "$name" == "null" || -z "$name" ]]; then
+  echo "Error: GitHub name is not set. Set a name at https://github.com/settings/profile" >&2
+  exit 1
+fi
+
 if [[ "$email" == "null" || -z "$email" ]]; then
   echo "Error: GitHub email is not public. Set a public email at https://github.com/settings/profile" >&2
   exit 1
