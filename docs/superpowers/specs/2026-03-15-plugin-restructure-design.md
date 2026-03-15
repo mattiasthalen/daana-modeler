@@ -33,10 +33,6 @@ daana-modeler/
 │   ├── mapping-schema.md
 │   ├── mapping-examples.md
 │   └── source-schema-formats.md
-├── CLAUDE.md
-├── README.md
-├── LICENSE
-└── .devcontainer/
 ├── .claude/
 │   └── settings.json
 ├── .devcontainer/
@@ -44,6 +40,9 @@ daana-modeler/
 │   └── superpowers/
 │       ├── specs/
 │       └── plans/
+├── CLAUDE.md
+├── README.md
+└── LICENSE
 ```
 
 ### What's unchanged
