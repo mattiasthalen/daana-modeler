@@ -16,6 +16,9 @@ The session flows through four phases: Connection, Bootstrap, Query Loop, and Ha
 - Never create or edit DMDL model or mapping files — that is the job of `/daana-model` and `/daana-map`.
 - Never make assumptions about business logic not present in the bootstrapped metadata.
 - Never hardcode TYPE_KEYs — they differ between installations. Always resolve from the bootstrap.
+- Never assume physical columns — always resolve via the bootstrap. For simple atomic contexts it might be `val_str`, but for complex ones each attribute maps to a different column.
+- Relationship table columns: when `table_pattern_column_name` is `FOCAL01_KEY` or `FOCAL02_KEY`, use `attribute_name` as the real column name — the pattern names don't exist in the physical table.
+- Never add a LIMIT clause by default — always ask the user first if they want to limit the number of rows returned.
 
 ## Adaptive Behavior
 
@@ -147,6 +150,8 @@ After bootstrap completes, summarize what was found:
 
 ## Phase 3: Query Loop
 
+Read `${CLAUDE_SKILL_DIR}/query-patterns.md` for all query construction patterns. Follow those patterns exactly when building SQL.
+
 ### Matching user questions to metadata
 
 The agent has the full model cached from bootstrap. Match the user's question to the cached data:
@@ -157,61 +162,47 @@ The agent has the full model cached from bootstrap. Match the user's question to
 
 If ambiguous, ask a clarifying question — never guess.
 
+### Time dimension — REQUIRED before building any query
+
+<HARD-GATE>
+**You MUST ask about the time dimension before building any query, unless the user has previously chosen "don't ask again" for both questions. Two sequential questions — ask one, wait for answer, then ask the next.**
+</HARD-GATE>
+
+**Question 1 — Latest or history?**
+
+Call the `AskUserQuestion` tool (do NOT print the question as text):
+
+- Question: "Do you want the latest values, or the full history of changes over time?"
+- Options: "Latest" / "Full history" / "Latest, don't ask again" / "History, don't ask again"
+
+**STOP and wait for the user's answer before asking Question 2.**
+
+- **Latest** — use Pattern 1 from query-patterns.md. Ask again next time.
+- **Full history** — use Pattern 2 (Temporal Alignment) from query-patterns.md. Ask again next time.
+- **Latest, don't ask again** — default to Pattern 1 for all future queries. Do not ask again.
+- **History, don't ask again** — default to Pattern 2 for all future queries. Do not ask again.
+
+**Question 2 — Cutoff date?**
+
+Call the `AskUserQuestion` tool (do NOT print the question as text):
+
+- Question: "Do you want data as of right now, or up to a specific cutoff date?"
+- Options: "Current (no cutoff)" / "Specific cutoff date" / "Current, don't ask again"
+
+**STOP and wait for the user's answer before building the query.**
+
+- **Current (no cutoff)** — no `eff_tmstp` filter. Ask again next time.
+- **Specific cutoff date** — ask the user for the date, then apply the cutoff modifier from query-patterns.md.
+- **Current, don't ask again** — default to no cutoff for all future queries. Do not ask again.
+
 ### Query patterns
 
-Build queries dynamically from the bootstrap data. Never hardcode TYPE_KEYs, table names, or column names. Always use fully-qualified lowercase schema names (e.g., `daana_dw.customer_desc`).
+Build queries dynamically from the bootstrap data following the patterns in `${CLAUDE_SKILL_DIR}/query-patterns.md`. Key rules:
 
-#### Pattern 1: Single attribute (latest)
-
-```sql
-SELECT [entity]_key, [physical_column] AS [attribute_name]
-FROM daana_dw.[descriptor_table]
-WHERE type_key = [atom_contx_key] AND row_st = 'Y'
-```
-
-#### Pattern 2: Multi-attribute pivot (latest)
-
-```sql
-SELECT
-  [entity]_key,
-  MAX(CASE WHEN type_key = [key1] THEN [physical_column1] END) AS [attr1],
-  MAX(CASE WHEN type_key = [key2] THEN [physical_column2] END) AS [attr2]
-FROM daana_dw.[descriptor_table]
-WHERE type_key IN ([key1], [key2]) AND row_st = 'Y'
-GROUP BY [entity]_key
-```
-
-#### Pattern 3: Full history (single attribute)
-
-No `ROW_ST` filter — return all rows to show the complete timeline:
-
-```sql
-SELECT
-  [entity]_key, type_key, eff_tmstp, ver_tmstp, row_st,
-  [physical_column] AS [attribute_name]
-FROM daana_dw.[descriptor_table]
-WHERE type_key = [atom_contx_key]
-ORDER BY [entity]_key, eff_tmstp, ver_tmstp
-```
-
-#### Pattern 4: Temporal alignment (multi-attribute history)
-
-Three-stage CTE pattern for flat pivoted history across multiple attributes that change independently.
-
-**Stage 1:** UNION ALL atomic contexts, carry-forward `eff_tmstp` per attribute via window function, deduplicate with RANK subquery. Use the QUALIFY alternative and carry-forward pattern from the dialect file.
-
-**Stage 2:** Per-attribute CTEs extracting values from stage 1.
-
-**Stage 3:** Final SELECT joining all CTEs on entity key + carry-forward timestamps.
-
-#### Relationship queries
-
-Join relationship tables (X tables) to descriptor tables via entity keys. Use `attribute_name` from bootstrap as the physical column name (not `FOCAL01_KEY`/`FOCAL02_KEY`).
-
-### ROW_ST filtering rules
-
-- **Latest / point-in-time:** Filter `row_st = 'Y'`. Use RANK window for latest.
-- **Full history:** Do NOT filter on `row_st`. Need both 'Y' and 'N' rows.
+- Never hardcode TYPE_KEYs, table names, or column names — always resolve from the bootstrap.
+- Always use fully-qualified lowercase schema names (e.g., `daana_dw.customer_desc`).
+- For relationship tables, use `attribute_name` as the physical column — not `FOCAL01_KEY`/`FOCAL02_KEY`.
+- Use the dialect file for platform-specific syntax (e.g., QUALIFY alternative, window frames).
 
 ### Lineage tracing
 
