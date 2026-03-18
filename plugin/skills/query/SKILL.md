@@ -44,6 +44,10 @@ pattern: "**/connections.yaml"
 
 If found, read the first match and parse the YAML profiles.
 
+<HARD-GATE>
+**You MUST ask the user to confirm the profile before using it. Do NOT skip this step, even for a single profile.**
+</HARD-GATE>
+
 - **Single profile:** Use `AskUserQuestion` to confirm:
   > Question: "I found one connection profile: **dev** (postgresql). Use this profile?"
   > Options: "Yes" / "No, connect manually"
@@ -52,7 +56,7 @@ If found, read the first match and parse the YAML profiles.
   > Question: "Which connection profile would you like to use?"
   > Options: one per profile, labeled with name and type (e.g., "dev (postgresql)")
 
-**STOP and wait for the user's answer before proceeding.**
+**STOP and wait for the user's answer before proceeding. Do NOT extract connection details or proceed to any other step until the user confirms.**
 
 - **If the file does not exist:** proceed to Step 3 (manual fallback).
 
@@ -84,7 +88,7 @@ After determining the connection type (from the profile, or ask the user if conn
 
 ### Step 5 — Gather dialect-specific details
 
-The dialect file specifies what additional information is needed. For example, the PostgreSQL dialect requires a Docker container name. Ask the user for any details not already in the connection profile.
+The dialect file specifies what additional information is needed (e.g., Docker container name for PostgreSQL). Check the connection profile first — only ask the user for details that are missing from it.
 
 ### Step 6 — Validate connectivity
 

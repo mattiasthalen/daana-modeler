@@ -33,6 +33,7 @@ Documentation: https://docs.daana.dev/dmdl/connections
 | `password` | string | Use `${VAR_NAME}` for env var interpolation |
 | `sslmode` | string | Default: `"disable"` |
 | `target_schema` | string | Schema for Daana output (e.g., `daana_dw`) |
+| `container` | string | Docker container name (used by dialect for `docker exec`) |
 
 ### Example
 
@@ -46,7 +47,10 @@ connections:
     password: "${DEV_PASSWORD}"
     database: "customerdb"
     target_schema: "daana_dw"
+    container: "daana-test-customerdb"
 ```
+
+> **Note:** The current query skill connects via `docker exec` into the database container. A future version will use a proper client connection (e.g., `psql` or a native driver) instead, making the `container` field unnecessary.
 
 ## Validation
 

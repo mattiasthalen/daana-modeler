@@ -4,7 +4,7 @@
 
 ### Via connections.yaml
 
-Extract `host`, `port`, `user`, `database`, `password` from the chosen profile. The container name for `docker exec` must be provided by the user or derived from the connection profile's host.
+Extract `host`, `port`, `user`, `database`, `password`, and `container` from the chosen profile. If `container` is not in the profile, ask the user: "What's the Docker container name for this database?"
 
 ### Execution command
 
