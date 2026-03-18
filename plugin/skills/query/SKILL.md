@@ -144,6 +144,15 @@ After bootstrap completes, summarize what was found:
 
 > "Bootstrapped from DAANA_METADATA. Found N entities: ENTITY_1 (X atomic contexts), ENTITY_2 (Y atomic contexts), ... and N relationships. What would you like to know?"
 
+## Multi-Question Detection
+
+At the start of every user message in Phase 3, check whether it contains **multiple distinct data questions**. Use natural language understanding — no regex parsing.
+
+- **One question** → proceed to the normal Phase 3 query loop below.
+- **Multiple questions** → enter the Multi-Query Flow (Phase 3B) before the query loop.
+
+This detection applies to every user message, not just the first one after bootstrap.
+
 ## Phase 3: Query Loop
 
 Read `${CLAUDE_SKILL_DIR}/query-patterns.md` for all query construction patterns. Follow those patterns exactly when building SQL.
