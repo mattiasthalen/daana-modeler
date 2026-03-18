@@ -248,3 +248,187 @@ The agent has everything it needs from the bootstrap result:
 5. **Final SELECT:** One LEFT JOIN per CTE, joining on entity key + carry-forward timestamp
 
 The agent should generate all of these dynamically from the bootstrap data — never hardcode type_keys or column names.
+
+## Relationship Queries
+
+### Detecting relationships from bootstrap
+
+When `table_pattern_column_name` is `FOCAL01_KEY` or `FOCAL02_KEY`, the descriptor concept is a **relationship table** (X table). The `attribute_name` values are the **actual physical column names** — not `FOCAL01_KEY`/`FOCAL02_KEY`.
+
+Example bootstrap rows for `RIDE_STATION_X`:
+
+| `descriptor_concept_name` | `atomic_context_name` | `atom_contx_key` | `attribute_name` | `table_pattern_column_name` |
+|---|---|---|---|---|
+| `RIDE_STATION_X` | `RIDE_START_STATION` | 16 | `ride_key` | `FOCAL01_KEY` |
+| `RIDE_STATION_X` | `RIDE_START_STATION` | 16 | `station_key` | `FOCAL02_KEY` |
+| `RIDE_STATION_X` | `RIDE_END_STATION` | 23 | `ride_key` | `FOCAL01_KEY` |
+| `RIDE_STATION_X` | `RIDE_END_STATION` | 23 | `station_key` | `FOCAL02_KEY` |
+
+This tells the agent:
+- The relationship table has two key columns: `ride_key` (pattern: `FOCAL01_KEY`) and `station_key` (pattern: `FOCAL02_KEY`)
+- `type_key = 16` means "start station", `type_key = 23` means "end station"
+
+### Column name rule
+
+```sql
+-- CORRECT: use attribute_name as the column name
+SELECT ride_key, station_key FROM daana_dw.ride_station_x WHERE type_key = 16
+
+-- WRONG: FOCAL01_KEY and FOCAL02_KEY don't exist in the physical table
+SELECT FOCAL01_KEY, FOCAL02_KEY FROM daana_dw.ride_station_x WHERE type_key = 16
+```
+
+### Joining relationship tables to descriptor tables
+
+Use the metadata-resolved column names to join:
+
+```sql
+SELECT
+  sd.[physical_column] AS [attribute_name],
+  COUNT(*) AS ride_count
+FROM [schema].[relationship_table] rx
+JOIN [schema].[entity_desc_table] sd
+  ON rx.[attribute_name_focal02] = sd.[entity]_key
+  AND sd.type_key = [desc_atom_contx_key] AND sd.row_st = 'Y'
+WHERE rx.type_key = [rel_atom_contx_key] AND rx.row_st = 'Y'
+GROUP BY sd.[physical_column]
+```
+
+**Important:** When joining to descriptor tables, use the descriptor table's own entity key column (e.g., `station_key` in `station_desc`), not the generic pattern column name.
+
+## Bootstrap Fallback
+
+If `f_focal_read` is not available, the agent can bootstrap using `atom_contx_nm` as the entry point. This table can always be searched by `val_str` without needing to know a type_key first:
+
+```sql
+SELECT atom_contx_key, val_str
+FROM daana_metadata.atom_contx_nm
+WHERE val_str IN (
+  'FOCAL_NAME',
+  'FOCAL_PHYSICAL_SCHEMA',
+  'ATOMIC_CONTEXT_NAME',
+  'ATTRIBUTE_NAME',
+  'DESCRIPTOR_CONCEPT_NAME',
+  'TABLE_PATTERN_COLUMN_NAME'
+)
+AND row_st = 'Y'
+```
+
+The agent should cache these resolved keys for the duration of its session and use them whenever reading from metadata tables.
+
+If the bootstrap is not available, fall back to searching `atom_contx_nm.val_str` directly:
+
+```sql
+SELECT atom_contx_key, val_str
+FROM daana_metadata.atom_contx_nm
+WHERE UPPER(val_str) LIKE UPPER('%<keyword>%')
+  AND row_st = 'Y'
+```
+
+Tips:
+- The naming convention is `ENTITY_ATTRIBUTE_NAME` — so searching for "CUSTOMER" narrows to that entity
+- Try multiple keywords if the first search returns nothing (e.g., "email" → "MAIL", "ADDRESS")
+- If too many results, combine entity + attribute keywords (e.g., `%CUSTOMER%EMAIL%`)
+
+Then resolve the full chain manually using the individual metadata tables (see `focal-framework.md` for the step-by-step chain).
+
+## Lineage Tracing
+
+Every physical table includes `inst_key` for pipeline execution logging. Join to `procinst_desc` in the metadata layer to retrieve the actual SQL that loaded a data row:
+
+```sql
+SELECT DISTINCT pd.val_str
+FROM daana_metadata.procinst_desc pd
+INNER JOIN daana_dw.[descriptor_table] dt
+  ON dt.inst_key = pd.procinst_key
+WHERE dt.[entity]_key = '<entity_key_value>'
+```
+
+## Decision Tree
+
+```
+User asks a question
+  │
+  ├─ Entity clear?
+  │   ├─ YES → continue
+  │   └─ NO → ask user to pick from bootstrapped entities
+  │
+  ├─ Attributes clear?
+  │   ├─ YES → match against atomic_context_name / attribute_name
+  │   └─ NO → list available atomic contexts for entity, ask user to pick
+  │
+  ├─ Cross-entity data needed?
+  │   ├─ YES → resolve relationship table + join
+  │   └─ NO → single table query
+  │
+  ├─ Latest or history? (HARD-GATE)
+  │   ├─ LATEST → Pattern 1
+  │   └─ HISTORY → Pattern 2 (Temporal Alignment)
+  │
+  └─ Cutoff date? (HARD-GATE)
+      ├─ NO → use current data (no eff_tmstp filter)
+      └─ YES → add eff_tmstp <= '<cutoff>' to inner query (Pattern 1) or twine CTE (Pattern 2)
+```
+
+---
+
+## End-to-End Worked Example
+
+This example shows the full process from a vague user question to a final SQL query. The agent knows **nothing** about the data model in advance — it could be any domain.
+
+### User says: "show me the total amount per supplier"
+
+#### Step 1: Bootstrap
+
+The agent runs the bootstrap query and discovers these entities (hypothetical):
+
+```
+focal_name     | descriptor_concept_name | atomic_context_name         | atom_contx_key | attribute_name   | table_pattern_column_name
+INVOICE_FOCAL  | INVOICE_DESC            | INVOICE_INVOICE_AMOUNT      | 42             | INVOICE_AMOUNT   | VAL_NUM
+INVOICE_FOCAL  | INVOICE_DESC            | INVOICE_INVOICE_CURRENCY    | 43             | INVOICE_CURRENCY | VAL_STR
+INVOICE_FOCAL  | INVOICE_SUPPLIER_X      | INVOICE_SUPPLIED_BY         | 50             | INVOICE_KEY      | FOCAL01_KEY
+INVOICE_FOCAL  | INVOICE_SUPPLIER_X      | INVOICE_SUPPLIED_BY         | 50             | SUPPLIER_KEY     | FOCAL02_KEY
+SUPPLIER_FOCAL | SUPPLIER_DESC           | SUPPLIER_SUPPLIER_NAME      | 61             | SUPPLIER_NAME    | VAL_STR
+```
+
+#### Step 2: Match keywords
+
+- **"amount"** → matches `INVOICE_INVOICE_AMOUNT` (atom_contx_key = 42, stored in `val_num`)
+- **"supplier"** → matches `SUPPLIER_FOCAL` entity, with `SUPPLIER_SUPPLIER_NAME` (atom_contx_key = 61, stored in `val_str`)
+- **"per supplier"** → requires a relationship. The bootstrap shows `INVOICE_SUPPLIER_X` links the two entities via `INVOICE_SUPPLIED_BY` (atom_contx_key = 50)
+
+The word "total" suggests SUM. If unsure, the agent asks.
+
+#### Step 3: Resolve relationship columns
+
+From the bootstrap:
+- `INVOICE_SUPPLIER_X` has `FOCAL01_KEY` → attribute name `invoice_key`
+- `INVOICE_SUPPLIER_X` has `FOCAL02_KEY` → attribute name `supplier_key`
+
+Since these are relationship columns, use `attribute_name` as the physical column (not `FOCAL01_KEY`/`FOCAL02_KEY`).
+
+#### Step 4: Build the query
+
+```sql
+SELECT
+  sd.val_str AS supplier_name,
+  SUM(id.val_num) AS total_amount
+FROM daana_dw.invoice_supplier_x rx
+JOIN daana_dw.invoice_desc id
+  ON rx.invoice_key = id.invoice_key
+  AND id.type_key = 42 AND id.row_st = 'Y'
+JOIN daana_dw.supplier_desc sd
+  ON rx.supplier_key = sd.supplier_key
+  AND sd.type_key = 61 AND sd.row_st = 'Y'
+WHERE rx.type_key = 50 AND rx.row_st = 'Y'
+GROUP BY sd.val_str
+ORDER BY total_amount DESC
+```
+
+#### Key takeaways
+
+1. **The agent never assumed any model structure.** Everything was discovered from the bootstrap.
+2. **Entity names, attribute names, and column names were all different from any prior example.** The process works regardless of domain.
+3. **The agent matched natural language to metadata names.** "amount" → `INVOICE_AMOUNT`, "supplier" → `SUPPLIER_NAME`.
+4. **Relationship columns used `attribute_name`, not `table_pattern_column_name`.** The agent detected `FOCAL01_KEY`/`FOCAL02_KEY` and switched to attribute names.
+5. **The agent asked clarifying questions** when "total" could mean different things.
