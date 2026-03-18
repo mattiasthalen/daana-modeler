@@ -30,6 +30,8 @@ Detect the user's knowledge level and adjust:
 
 ## Phase 1: Connection
 
+Read `${CLAUDE_SKILL_DIR}/connections.md` for the connection profile schema.
+
 ### Step 1 — Look for connections.yaml
 
 **You MUST search for the connections file before asking any connection questions:**
@@ -38,41 +40,17 @@ Detect the user's knowledge level and adjust:
 find . -maxdepth 3 -name "connections.yaml" -type f 2>/dev/null
 ```
 
-If found, read the first match:
+If found, read the first match and parse the YAML profiles.
 
-```bash
-cat <path-to-connections.yaml>
-```
+- **Single profile:** Use `AskUserQuestion` to confirm:
+  > Question: "I found one connection profile: **dev** (postgresql). Use this profile?"
+  > Options: "Yes" / "No, connect manually"
 
-- **If the file exists:** parse the YAML and read all profiles.
+- **Multiple profiles:** Use `AskUserQuestion` to let the user pick:
+  > Question: "Which connection profile would you like to use?"
+  > Options: one per profile, labeled with name and type (e.g., "dev (postgresql)")
 
-  **Connection profile schema:**
-
-  | Field | Type | Required | Description |
-  |-------|------|----------|-------------|
-  | `type` | string | yes | Database type (e.g., `"postgresql"`) |
-  | `host` | string | yes | Database server hostname |
-  | `port` | integer | yes | Default: 5432 |
-  | `user` | string | yes | Database username |
-  | `database` | string | yes | Database name |
-  | `password` | string | no | Use `${VAR_NAME}` for env var interpolation |
-  | `target_schema` | string | no | Schema for Daana output (e.g., `daana_dw`) |
-
-  Supported types: `postgresql`. Other types (`bigquery`, `mssql`, `oracle`, `snowflake`) are not yet supported in the query skill.
-
-  - **Single profile:** Use `AskUserQuestion` to confirm:
-    > Question: "I found one connection profile: **dev** (postgresql). Use this profile?"
-    > Options: "Yes" / "No, connect manually"
-
-  - **Multiple profiles:** Use `AskUserQuestion` to let the user pick:
-    > Question: "Which connection profile would you like to use?"
-    > Options: one per profile, labeled with name and type (e.g., "dev (postgresql)")
-
-  **STOP and wait for the user's answer before proceeding.**
-
-  If the user picks a non-PostgreSQL profile, use `AskUserQuestion`:
-  > Question: "Only PostgreSQL is supported right now. What would you like to do?"
-  > Options: "Pick another profile" / "Connect manually"
+**STOP and wait for the user's answer before proceeding.**
 
 - **If the file does not exist:** proceed to Step 3 (manual fallback).
 
@@ -94,21 +72,27 @@ Then ask **one at a time:**
 2. **Database user** — "Database user?" (e.g., `dev`)
 3. **Database name** — "Database name?" (e.g., `customerdb`)
 
-### Step 4 — Validate connectivity
+### Step 4 — Dialect resolution
 
-Run a connectivity check:
+After determining the connection type from the profile:
 
-```bash
-docker exec <container> psql -U <user> -d <database> -P pager=off --csv -c "SELECT 1"
-```
+- Try to read `${CLAUDE_SKILL_DIR}/dialect-<type>.md` (e.g., `dialect-postgres.md`)
+- If found — use it for all connection, bootstrap, and query mechanics.
+- If not found — use `AskUserQuestion`:
+  > Question: "No native support for [type] yet. I can try translating from PostgreSQL patterns, but results may need tweaking. Want me to try?"
+  > Options: "Yes, try transpiling" / "No, cancel"
 
-**Important:** Never use `-it` flags — Claude Code's Bash tool has no interactive TTY. Always include `-P pager=off --csv`.
+  If transpiling — read `${CLAUDE_SKILL_DIR}/dialect-postgres.md` as reference.
 
-If validation fails, report the error and ask the user to verify the details.
+### Step 5 — Validate connectivity
+
+Run the connectivity check command from the dialect file. If validation fails, report the error and ask the user to verify the details.
 
 ## Phase 2: Bootstrap
 
-### Step 5 — Bootstrap consent
+Read `${CLAUDE_SKILL_DIR}/focal-framework.md` before proceeding.
+
+### Step 6 — Bootstrap consent
 
 <HARD-GATE>
 **You MUST ask the user for permission before running the bootstrap query. Do NOT skip this step.**
@@ -121,18 +105,12 @@ After a successful connection, use `AskUserQuestion`:
 
 **STOP and wait for the user's answer.**
 
-- **If the user says yes:** proceed to Step 6.
+- **If the user says yes:** proceed to Step 7.
 - **If the user says no:** skip to Phase 3. The agent works without metadata but may need to ask more clarifying questions.
 
-### Step 6 — Run bootstrap query
+### Step 7 — Run bootstrap query
 
-```bash
-docker exec <container> psql -U <user> -d <database> -P pager=off --csv -c "SELECT focal_name, descriptor_concept_name, atomic_context_name, atom_contx_key, attribute_name, table_pattern_column_name FROM daana_metadata.f_focal_read('9999-12-31') WHERE focal_physical_schema = 'DAANA_DW' ORDER BY focal_name, descriptor_concept_name, atomic_context_name"
-```
-
-**Note:** `focal_physical_schema` is uppercase (`'DAANA_DW'`, not `'daana_dw'`), but use lowercase schema names in data queries (e.g., `daana_dw.customer_desc`).
-
-Cache the entire result in memory for the session. This is your complete model — no further metadata queries are needed.
+Run the bootstrap query from the dialect file. Cache the entire result in memory for the session. This is your complete model — no further metadata queries are needed.
 
 ### Bootstrap interpretation
 
@@ -214,26 +192,7 @@ ORDER BY [entity]_key, eff_tmstp, ver_tmstp
 
 Three-stage CTE pattern for flat pivoted history across multiple attributes that change independently.
 
-**Stage 1:** UNION ALL atomic contexts, carry-forward `eff_tmstp` per attribute via window function, deduplicate with RANK subquery.
-
-```sql
--- PostgreSQL does not support QUALIFY — use subquery instead:
-SELECT * FROM (
-  SELECT *, RANK() OVER (PARTITION BY key ORDER BY ts DESC) AS rnk
-  FROM table
-) sub WHERE rnk = 1
-```
-
-Carry-forward pattern:
-
-```sql
-MAX(CASE WHEN timeline = 'ATTR_NAME' THEN eff_tmstp END)
-  OVER (
-    PARTITION BY entity_key
-    ORDER BY eff_tmstp
-    RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-  ) AS eff_tmstp_attr_name
-```
+**Stage 1:** UNION ALL atomic contexts, carry-forward `eff_tmstp` per attribute via window function, deduplicate with RANK subquery. Use the QUALIFY alternative and carry-forward pattern from the dialect file.
 
 **Stage 2:** Per-attribute CTEs extracting values from stage 1.
 
@@ -250,21 +209,13 @@ Join relationship tables (X tables) to descriptor tables via entity keys. Use `a
 
 ### Lineage tracing
 
-Every physical table includes `INST_KEY` (instance key / `PROCINST_KEY`) for pipeline execution logging. To trace which pipeline loaded a specific data row:
-
-```sql
-SELECT DISTINCT pd.val_str
-FROM daana_metadata.procinst_desc pd
-INNER JOIN daana_dw.[table] t
-  ON t.inst_key = pd.procinst_key
-WHERE t.[entity]_key = '[key_value]'
-```
+Every physical table includes `INST_KEY` for pipeline execution logging. Refer to `${CLAUDE_SKILL_DIR}/focal-framework.md` for the lineage query pattern joining `INST_KEY` to `PROCINST_DESC`.
 
 ### Safety guardrails
 
 - **SELECT only:** Only `SELECT` statements permitted. Refuse any DDL/DML.
 - **No default LIMIT:** Do not add LIMIT unless the user asks for it. If the result set looks large, ask the user if they want to limit.
-- **Query timeout:** Prefix all queries with `SET statement_timeout = '30s';`.
+- **Query timeout:** Use the statement timeout from the dialect file.
 - **SQL generation safety:** The agent always generates SQL itself — user natural language is never interpolated directly into SQL strings. All identifiers come from the bootstrap result.
 
 ### Execution consent
@@ -287,15 +238,7 @@ Before running a query, show the generated SQL and use `AskUserQuestion`:
 
 ### Execution mechanics
 
-All queries run via `docker exec` in CSV format:
-
-```bash
-docker exec <container> psql -U <user> -d <database> -P pager=off --csv -c "SET statement_timeout = '30s'; <SQL>"
-```
-
-**Important:** Never use `-it` flags. Always include `-P pager=off --csv`.
-
-Single CSV execution — the agent parses the output and renders a readable markdown table. No second execution needed.
+Execute using the command pattern from the dialect file. Single CSV execution — the agent parses the output and renders a readable markdown table. No second execution needed.
 
 ### Result presentation
 
