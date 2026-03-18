@@ -1,0 +1,14 @@
+{
+  "repos": [
+    {
+      "name": "teach_claude_focal",
+      "url": "git@github.com:PatrikLager/teach_claude_focal.git",
+      "commit": "d49cb259e02de9f989298902b95b37a73ab7edf3"
+    },
+    {
+      "name": "daana-cli",
+      "url": "git@github.com:daana-code/daana-cli.git",
+      "commit": "1b9a55be4d69597c5ac2ec375c88c07130da7513"
+    }
+  ]
+}
