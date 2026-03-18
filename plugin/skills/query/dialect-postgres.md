@@ -4,7 +4,14 @@
 
 ### Via connections.yaml
 
-Extract `host`, `port`, `user`, `database`, `password`, and `container` from the chosen profile. If `container` is not in the profile, ask the user: "What's the Docker container name for this database?"
+Extract `host`, `port`, `user`, `database`, `password`, and `container` from the chosen profile.
+
+If `container` is not in the profile, try to resolve it automatically before asking the user:
+
+1. Search for `docker-compose.yaml` or `docker-compose.yml` using the Glob tool (`**/docker-compose.{yaml,yml}`)
+2. If found, read it and look for a service whose container name, service name, or database configuration matches the connection profile (e.g., matching `host`, `database`, or `port`)
+3. If a match is found, use that container/service name
+4. If no match or no docker-compose file, then ask the user: "What's the Docker container name for this database?"
 
 ### Execution command
 
