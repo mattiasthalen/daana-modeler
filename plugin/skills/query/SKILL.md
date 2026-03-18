@@ -153,6 +153,68 @@ At the start of every user message in Phase 3, check whether it contains **multi
 
 This detection applies to every user message, not just the first one after bootstrap.
 
+## Phase 3B: Multi-Query Flow
+
+Enter this flow when multiple questions are detected in a single user message.
+
+### Step 1 — Confirm the questions
+
+Present the parsed questions as a numbered list. Call the `AskUserQuestion` tool (do NOT print the question as text):
+
+- Question: "I see N questions:\n1. [question 1]\n2. [question 2]\n3. [question 3]\n\nIs this right?"
+- Options: "Yes" / "No, let me adjust"
+
+**STOP and wait for the user's answer. If they adjust, re-parse and confirm again.**
+
+### Step 2 — Time dimension (once for all)
+
+Ask the two existing time dimension hard-gate questions — same as Phase 3, but the answers apply to **all questions in the batch**:
+
+1. Latest or history? (same options as Phase 3)
+2. Cutoff date? (same options as Phase 3)
+
+These choices are locked in for the entire batch.
+
+### Step 3 — Execution mode
+
+Call the `AskUserQuestion` tool (do NOT print the question as text):
+
+- Question: "Run these sequentially in this session, or in parallel via subagents?"
+- Options: "Sequential" / "Parallel"
+
+**STOP and wait for the user's answer.**
+
+- **Sequential** → proceed to Step 4A.
+- **Parallel** → proceed to Step 4B.
+
+### Step 4A — Sequential execution
+
+Loop through each question using the existing Phase 3 query loop. For each question:
+
+- Skip the time dimension questions (already answered in Step 2).
+- Skip execution consent (auto-execute).
+- Present each result as it completes (SQL, table, summary, follow-ups).
+
+After all questions are answered, present a **combined summary**: a brief recap of all answers with any cross-cutting insights.
+
+Then return to the normal Phase 3 query loop for further questions.
+
+### Step 4B — Parallel execution
+
+<HARD-GATE>
+**You MUST ask for execution consent before dispatching subagents. Do NOT skip this step.**
+</HARD-GATE>
+
+Call the `AskUserQuestion` tool (do NOT print the question as text):
+
+- Question: "Auto-execute all queries in this batch?"
+- Options: "Yes, auto-execute" / "No, cancel"
+
+**STOP and wait for the user's answer.**
+
+- **Yes** → dispatch subagents (see Parallel Subagent Dispatch below).
+- **No** → return to the normal Phase 3 query loop.
+
 ## Phase 3: Query Loop
 
 Read `${CLAUDE_SKILL_DIR}/query-patterns.md` for all query construction patterns. Follow those patterns exactly when building SQL.
