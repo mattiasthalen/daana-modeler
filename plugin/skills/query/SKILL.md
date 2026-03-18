@@ -42,18 +42,21 @@ Detect the user's knowledge level and adjust:
 cat connections.yaml
 ```
 
-- **If the file exists:** parse the YAML, list all profiles with their type, and ask the user which one to use. See `references/connections-schema.md` for the schema.
+- **If the file exists:** parse the YAML and read all profiles. See `references/connections-schema.md` for the schema.
 
-  > "I found these connection profiles in connections.yaml:"
-  > 1. dev (postgresql)
-  > 2. staging (postgresql)
-  >
-  > "Which one would you like to use?"
+  - **Single profile:** Use `AskUserQuestion` to confirm:
+    > Question: "I found one connection profile: **dev** (postgresql). Use this profile?"
+    > Options: "Yes" / "No, connect manually"
+
+  - **Multiple profiles:** Use `AskUserQuestion` to let the user pick:
+    > Question: "Which connection profile would you like to use?"
+    > Options: one per profile, labeled with name and type (e.g., "dev (postgresql)")
 
   **STOP and wait for the user's answer before proceeding.**
 
-  If the user picks a non-PostgreSQL profile:
-  > "Only PostgreSQL is supported right now. Pick another profile or connect manually?"
+  If the user picks a non-PostgreSQL profile, use `AskUserQuestion`:
+  > Question: "Only PostgreSQL is supported right now. What would you like to do?"
+  > Options: "Pick another profile" / "Connect manually"
 
 - **If the file does not exist:** proceed to Step 3 (manual fallback).
 
@@ -93,9 +96,10 @@ If validation fails, report the error and ask the user to verify the details.
 **You MUST ask the user for permission before running the bootstrap query. Do NOT skip this step.**
 </HARD-GATE>
 
-After a successful connection, ask the user:
+After a successful connection, use `AskUserQuestion`:
 
-> "Connected! Want me to bootstrap the Focal metadata? I'll run one query to discover all entities, attributes, and relationships. (yes / no)"
+> Question: "Connected! Want me to bootstrap the Focal metadata? I'll run one query to discover all entities, attributes, and relationships."
+> Options: "Yes, bootstrap metadata" / "No, skip bootstrap"
 
 **STOP and wait for the user's answer.**
 
@@ -229,21 +233,17 @@ Join relationship tables (X tables) to descriptor tables via entity keys. Use `a
 **You MUST ask the user for permission before executing any query. Do NOT run queries without explicit consent unless the user has previously chosen "yes, don't ask again".**
 </HARD-GATE>
 
-Before running a query, show the generated SQL and ask the user verbatim:
+Before running a query, show the generated SQL and use `AskUserQuestion`:
 
-> "Run this query?"
-> ```sql
-> SELECT ...
-> ```
-> 1. yes
-> 2. yes, don't ask again
-> 3. no
+> Present the SQL in a code block, then ask:
+> Question: "Run this query?"
+> Options: "Yes" / "Yes, don't ask again" / "No"
 
 **STOP and wait for the user's answer.**
 
-- **1 (yes)** — run this query, ask again next time.
-- **2 (yes, don't ask again)** — auto-execute all queries for the rest of the session. Do not ask again.
-- **3 (no)** — don't run. Ask the user what to adjust.
+- **Yes** — run this query, ask again next time.
+- **Yes, don't ask again** — auto-execute all queries for the rest of the session. Do not ask again.
+- **No** — don't run. Ask the user what to adjust.
 
 ### Execution mechanics
 
