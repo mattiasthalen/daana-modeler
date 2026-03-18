@@ -215,6 +215,39 @@ Call the `AskUserQuestion` tool (do NOT print the question as text):
 - **Yes** → dispatch subagents (see Parallel Subagent Dispatch below).
 - **No** → return to the normal Phase 3 query loop.
 
+### Parallel Subagent Dispatch
+
+After execution consent is granted, dispatch one subagent per question using the `Agent` tool. Launch **all subagents in a single message** so they run concurrently.
+
+#### Subagent prompt construction
+
+Each subagent prompt MUST include all of the following — the subagent has no other context:
+
+1. **Role:** "You are a data analyst answering a single question against a Focal-based Daana data warehouse."
+2. **Scope rules:** Copy the Scope section from this skill (read-only, no DDL/DML, no hardcoded TYPE_KEYs, etc.)
+3. **Bootstrap data:** The full cached bootstrap result, serialized as a markdown table or CSV block.
+4. **Connection details:** Host, port, user, database, password (env var reference), sslmode.
+5. **Dialect instructions:** The full contents of the dialect file (e.g., `dialect-postgres.md`) — execution command, statement timeout, syntax rules.
+6. **Query patterns:** The full contents of `query-patterns.md`.
+7. **Time dimension choices:** The pre-answered latest/history and cutoff date decisions from Step 2.
+8. **Execution consent:** "Execution is pre-approved. Execute the query without asking."
+9. **The question:** The single question this subagent must answer.
+10. **Output format:** "Return: (a) the generated SQL in a code block, (b) the query result as a markdown table, (c) a natural language summary in business terms, (d) 2-3 suggested follow-up questions."
+
+#### Result presentation
+
+- Present each subagent's result as it arrives: question number, SQL, result table, summary.
+- After **all** subagents complete, present a **combined summary**: a brief recap of all answers with any cross-cutting insights the agent notices across results.
+
+#### Error handling
+
+If a subagent fails (bad SQL, no results, ambiguous metadata match):
+
+- Report the error alongside successful results.
+- Offer to retry the failed question interactively in the current session (using the normal Phase 3 query loop).
+
+After all results are presented, return to the normal Phase 3 query loop for further questions.
+
 ## Phase 3: Query Loop
 
 Read `${CLAUDE_SKILL_DIR}/query-patterns.md` for all query construction patterns. Follow those patterns exactly when building SQL.
