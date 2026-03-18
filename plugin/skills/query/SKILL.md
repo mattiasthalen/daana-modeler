@@ -89,11 +89,7 @@ After determining the connection type (from the profile, or ask the user if conn
 
   If transpiling — read `${CLAUDE_SKILL_DIR}/dialect-postgres.md` as reference.
 
-### Step 5 — Gather dialect-specific details
-
-The dialect file specifies what additional information is needed (e.g., Docker container name for PostgreSQL). Check the connection profile first — only ask the user for details that are missing from it.
-
-### Step 6 — Validate connectivity
+### Step 5 — Validate connectivity
 
 Run the connectivity check command from the dialect file. If validation fails, report the error and ask the user to verify the details.
 
@@ -101,7 +97,7 @@ Run the connectivity check command from the dialect file. If validation fails, r
 
 Read `${CLAUDE_SKILL_DIR}/focal-framework.md` before proceeding.
 
-### Step 7 — Bootstrap consent
+### Step 6 — Bootstrap consent
 
 <HARD-GATE>
 **You MUST ask the user for permission before running the bootstrap query. Do NOT skip this step.**
@@ -114,10 +110,10 @@ After a successful connection, you MUST call the `AskUserQuestion` tool (do NOT 
 
 **STOP and wait for the user's answer. Do NOT proceed until the user responds to the AskUserQuestion.**
 
-- **If the user says yes:** proceed to Step 8.
+- **If the user says yes:** proceed to Step 7.
 - **If the user says no:** skip to Phase 3. The agent works without metadata but may need to ask more clarifying questions.
 
-### Step 8 — Run bootstrap query
+### Step 7 — Run bootstrap query
 
 Run the bootstrap query from the dialect file. Cache the entire result in memory for the session. This is your complete model — no further metadata queries are needed.
 
