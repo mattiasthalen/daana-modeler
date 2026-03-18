@@ -48,13 +48,13 @@ If found, read the first match and parse the YAML profiles.
 **You MUST ask the user to confirm the profile before using it. Do NOT skip this step, even for a single profile.**
 </HARD-GATE>
 
-- **Single profile:** Use `AskUserQuestion` to confirm:
-  > Question: "I found one connection profile: **dev** (postgresql). Use this profile?"
-  > Options: "Yes" / "No, connect manually"
+- **Single profile:** Call the `AskUserQuestion` tool (do NOT print the question as text):
+  - Question: "I found one connection profile: **dev** (postgresql). Use this profile?"
+  - Options: "Yes" / "No, connect manually"
 
-- **Multiple profiles:** Use `AskUserQuestion` to let the user pick:
-  > Question: "Which connection profile would you like to use?"
-  > Options: one per profile, labeled with name and type (e.g., "dev (postgresql)")
+- **Multiple profiles:** Call the `AskUserQuestion` tool (do NOT print the question as text):
+  - Question: "Which connection profile would you like to use?"
+  - Options: one per profile, labeled with name and type (e.g., "dev (postgresql)")
 
 **STOP and wait for the user's answer before proceeding. Do NOT extract connection details or proceed to any other step until the user confirms.**
 
@@ -80,9 +80,9 @@ After determining the connection type (from the profile, or ask the user if conn
 
 - Try to read `${CLAUDE_SKILL_DIR}/dialect-<type>.md` (e.g., `dialect-postgres.md`)
 - If found — use it for all connection, bootstrap, and query mechanics.
-- If not found — use `AskUserQuestion`:
-  > Question: "No native support for [type] yet. I can try translating from PostgreSQL patterns, but results may need tweaking. Want me to try?"
-  > Options: "Yes, try transpiling" / "No, cancel"
+- If not found — call the `AskUserQuestion` tool (do NOT print the question as text):
+  - Question: "No native support for [type] yet. I can try translating from PostgreSQL patterns, but results may need tweaking. Want me to try?"
+  - Options: "Yes, try transpiling" / "No, cancel"
 
   If transpiling — read `${CLAUDE_SKILL_DIR}/dialect-postgres.md` as reference.
 
@@ -104,12 +104,12 @@ Read `${CLAUDE_SKILL_DIR}/focal-framework.md` before proceeding.
 **You MUST ask the user for permission before running the bootstrap query. Do NOT skip this step.**
 </HARD-GATE>
 
-After a successful connection, use `AskUserQuestion`:
+After a successful connection, you MUST call the `AskUserQuestion` tool (do NOT print the question as text):
 
-> Question: "Connected! Want me to bootstrap the Focal metadata? I'll run one query to discover all entities, attributes, and relationships."
-> Options: "Yes, bootstrap metadata" / "No, skip bootstrap"
+- Question: "Connected! Want me to bootstrap the Focal metadata? I'll run one query to discover all entities, attributes, and relationships."
+- Options: "Yes, bootstrap metadata" / "No, skip bootstrap"
 
-**STOP and wait for the user's answer.**
+**STOP and wait for the user's answer. Do NOT proceed until the user responds to the AskUserQuestion.**
 
 - **If the user says yes:** proceed to Step 8.
 - **If the user says no:** skip to Phase 3. The agent works without metadata but may need to ask more clarifying questions.
@@ -230,13 +230,12 @@ Every physical table includes `INST_KEY` for pipeline execution logging. Refer t
 **You MUST ask the user for permission before executing any query. Do NOT run queries without explicit consent unless the user has previously chosen "yes, don't ask again".**
 </HARD-GATE>
 
-Before running a query, show the generated SQL and use `AskUserQuestion`:
+Before running a query, show the generated SQL in a code block, then call the `AskUserQuestion` tool (do NOT print the question as text):
 
-> Present the SQL in a code block, then ask:
-> Question: "Run this query?"
-> Options: "Yes" / "Yes, don't ask again" / "No"
+- Question: "Run this query?"
+- Options: "Yes" / "Yes, don't ask again" / "No"
 
-**STOP and wait for the user's answer.**
+**STOP and wait for the user's answer. Do NOT execute the query until the user responds to the AskUserQuestion.**
 
 - **Yes** — run this query, ask again next time.
 - **Yes, don't ask again** — auto-execute all queries for the rest of the session. Do not ask again.
