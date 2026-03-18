@@ -144,6 +144,110 @@ After bootstrap completes, summarize what was found:
 
 > "Bootstrapped from DAANA_METADATA. Found N entities: ENTITY_1 (X atomic contexts), ENTITY_2 (Y atomic contexts), ... and N relationships. What would you like to know?"
 
+## Multi-Question Detection
+
+At the start of every user message in Phase 3, check whether it contains **multiple distinct data questions**. Use natural language understanding — no regex parsing.
+
+- **One question** → proceed to the normal Phase 3 query loop below.
+- **Multiple questions** → enter the Multi-Query Flow (Phase 3B) before the query loop.
+
+This detection applies to every user message, not just the first one after bootstrap.
+
+## Phase 3B: Multi-Query Flow
+
+Enter this flow when multiple questions are detected in a single user message.
+
+### Step 1 — Confirm the questions
+
+Present the parsed questions as a numbered list. Call the `AskUserQuestion` tool (do NOT print the question as text):
+
+- Question: "I see N questions:\n1. [question 1]\n2. [question 2]\n3. [question 3]\n\nIs this right?"
+- Options: "Yes" / "No, let me adjust"
+
+**STOP and wait for the user's answer. If they adjust, re-parse and confirm again.**
+
+### Step 2 — Time dimension (once for all)
+
+Ask the two existing time dimension hard-gate questions — same as Phase 3, but the answers apply to **all questions in the batch**:
+
+1. Latest or history? (same options as Phase 3)
+2. Cutoff date? (same options as Phase 3)
+
+These choices are locked in for the entire batch.
+
+### Step 3 — Execution mode
+
+Call the `AskUserQuestion` tool (do NOT print the question as text):
+
+- Question: "Run these sequentially in this session, or in parallel via subagents?"
+- Options: "Sequential" / "Parallel"
+
+**STOP and wait for the user's answer.**
+
+- **Sequential** → proceed to Step 4A.
+- **Parallel** → proceed to Step 4B.
+
+### Step 4A — Sequential execution
+
+Loop through each question using the existing Phase 3 query loop. For each question:
+
+- Skip the time dimension questions (already answered in Step 2).
+- Skip execution consent (auto-execute).
+- Present each result as it completes (SQL, table, summary, follow-ups).
+
+After all questions are answered, present a **combined summary**: a brief recap of all answers with any cross-cutting insights.
+
+Then return to the normal Phase 3 query loop for further questions.
+
+### Step 4B — Parallel execution
+
+<HARD-GATE>
+**You MUST ask for execution consent before dispatching subagents. Do NOT skip this step.**
+</HARD-GATE>
+
+Call the `AskUserQuestion` tool (do NOT print the question as text):
+
+- Question: "Auto-execute all queries in this batch?"
+- Options: "Yes, auto-execute" / "No, cancel"
+
+**STOP and wait for the user's answer.**
+
+- **Yes** → dispatch subagents (see Parallel Subagent Dispatch below).
+- **No** → return to the normal Phase 3 query loop.
+
+### Parallel Subagent Dispatch
+
+After execution consent is granted, dispatch one subagent per question using the `Agent` tool. Launch **all subagents in a single message** so they run concurrently.
+
+#### Subagent prompt construction
+
+Each subagent prompt MUST include all of the following — the subagent has no other context:
+
+1. **Role:** "You are a data analyst answering a single question against a Focal-based Daana data warehouse."
+2. **Scope rules:** Copy the Scope section from this skill (read-only, no DDL/DML, no hardcoded TYPE_KEYs, etc.)
+3. **Bootstrap data:** The full cached bootstrap result, serialized as a markdown table or CSV block.
+4. **Connection details:** Host, port, user, database, password (env var reference), sslmode.
+5. **Dialect instructions:** The full contents of the dialect file (e.g., `dialect-postgres.md`) — execution command, statement timeout, syntax rules.
+6. **Query patterns:** The full contents of `query-patterns.md`.
+7. **Time dimension choices:** The pre-answered latest/history and cutoff date decisions from Step 2.
+8. **Execution consent:** "Execution is pre-approved. Execute the query without asking."
+9. **The question:** The single question this subagent must answer.
+10. **Output format:** "Return: (a) the generated SQL in a code block, (b) the query result as a markdown table, (c) a natural language summary in business terms, (d) 2-3 suggested follow-up questions."
+
+#### Result presentation
+
+- Present each subagent's result as it arrives: question number, SQL, result table, summary.
+- After **all** subagents complete, present a **combined summary**: a brief recap of all answers with any cross-cutting insights the agent notices across results.
+
+#### Error handling
+
+If a subagent fails (bad SQL, no results, ambiguous metadata match):
+
+- Report the error alongside successful results.
+- Offer to retry the failed question interactively in the current session (using the normal Phase 3 query loop).
+
+After all results are presented, return to the normal Phase 3 query loop for further questions.
+
 ## Phase 3: Query Loop
 
 Read `${CLAUDE_SKILL_DIR}/query-patterns.md` for all query construction patterns. Follow those patterns exactly when building SQL.
@@ -161,7 +265,7 @@ If ambiguous, ask a clarifying question — never guess.
 ### Time dimension — REQUIRED before building any query
 
 <HARD-GATE>
-**You MUST ask about the time dimension before building any query, unless the user has previously chosen "don't ask again" for both questions. Two sequential questions — ask one, wait for answer, then ask the next.**
+**You MUST ask about the time dimension before building any query, unless the user has previously chosen "don't ask again" for both questions, OR the time dimension was already answered in the Multi-Query Flow (Phase 3B Step 2). Two sequential questions — ask one, wait for answer, then ask the next.**
 </HARD-GATE>
 
 **Question 1 — Latest or history?**
@@ -214,7 +318,7 @@ Every physical table includes `INST_KEY` for pipeline execution logging. Refer t
 ### Execution consent
 
 <HARD-GATE>
-**You MUST ask the user for permission before executing any query. Do NOT run queries without explicit consent unless the user has previously chosen "yes, don't ask again".**
+**You MUST ask the user for permission before executing any query. Do NOT run queries without explicit consent unless the user has previously chosen "yes, don't ask again", OR execution was pre-approved in the Multi-Query Flow (Phase 3B Step 4A/4B).**
 </HARD-GATE>
 
 Before running a query, show the generated SQL in a code block, then call the `AskUserQuestion` tool (do NOT print the question as text):
