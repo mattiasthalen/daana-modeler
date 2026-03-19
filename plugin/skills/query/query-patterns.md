@@ -619,16 +619,23 @@ User asks a question
   │   └─ NO → list available atomic contexts for entity, ask user to pick
   │
   ├─ Cross-entity data needed?
-  │   ├─ YES → resolve relationship table + join
+  │   ├─ YES → resolve relationship table
   │   └─ NO → single table query
   │
   ├─ Latest or history? (HARD-GATE)
   │   ├─ LATEST → Pattern 1
-  │   └─ HISTORY → Pattern 2 (Temporal Alignment)
+  │   │   └─ Relationships use the same RANK pattern in their own CTE
+  │   │
+  │   └─ HISTORY
+  │       ├─ Single entity? → Pattern 2: Temporal Alignment (carry-forward + per-attribute CTEs + join)
+  │       └─ Cross-entity? → Pattern 3: Multi-Entity History
+  │           ├─ Anchor descriptors + relationship → combined twine (same anchor key)
+  │           ├─ Related entity descriptors → independent history module (own key)
+  │           └─ Final join: carry-forward for anchor CTEs + LATERAL point-in-time for related CTEs
   │
   └─ Cutoff date? (HARD-GATE)
       ├─ NO → use current data (no eff_tmstp filter)
-      └─ YES → add eff_tmstp <= '<cutoff>' to inner query (Pattern 1) or twine CTE (Pattern 2)
+      └─ YES → add eff_tmstp <= '<cutoff>' to inner query (Pattern 1), twine CTEs + LATERAL WHERE (Pattern 2/3)
 ```
 
 ---
