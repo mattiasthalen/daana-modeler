@@ -591,8 +591,7 @@ order_events AS (
 SELECT
     'order_line' AS peripheral,
     ORDER_LINE_KEY AS _key__order_line,
-    NULL::bigint AS _key__order,
-    _key__order AS _key__order,
+    _key__order,
     _key__product,
     _key__customer,
     event,
@@ -609,7 +608,6 @@ UNION ALL
 SELECT
     'order' AS peripheral,
     NULL::bigint AS _key__order_line,
-    ORDER_KEY AS _key__order,
     ORDER_KEY AS _key__order,
     NULL::bigint AS _key__product,
     _key__customer,
