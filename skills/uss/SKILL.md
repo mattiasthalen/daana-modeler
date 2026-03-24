@@ -37,9 +37,15 @@ Auto-classify entities from the bootstrap:
 - **Bridge candidates:** Entities with at least one timestamp attribute (STA_TMSTP or END_TMSTP) and/or numeric attributes (VAL_NUM)
 - **Peripheral candidates:** Entities referenced via M:1 relationships (on the FOCAL02_KEY side)
 
-Present the classification and ask the user to confirm:
+<HARD-GATE>
+**You MUST ask the user to confirm the entity classification before proceeding. Do NOT skip this step.**
+</HARD-GATE>
+
+Present the classification and ask the user to confirm. Call the `AskUserQuestion` tool (do NOT print the question as text):
 - Question: "Based on the metadata, here's my proposed USS layout:\n\n**Bridge sources:** ENTITY_A, ENTITY_B\n**Peripherals:** ENTITY_C, ENTITY_D\n\nDoes this look right?"
 - Options: "Yes" / "No, let me adjust"
+
+**STOP and wait for the user's answer before proceeding.**
 
 If the user adjusts, re-classify based on their input.
 
@@ -70,8 +76,10 @@ If "Custom", ask for each file type (bridge, peripherals, synthetics) separately
 
 ### Question 5 — Output Folder
 
-- Question: "Where should I write the SQL files?"
-- Options: Let the user type a path (provide a suggested default like `uss/`)
+- Question: "Where should I write the SQL files? Default: `uss/`"
+- Options: "uss/" / "Custom path"
+
+If "Custom path", ask the user to provide the path.
 
 ## Phase 2: Generate
 
@@ -116,9 +124,16 @@ Ask the user for the target schema name if not obvious from the connection profi
 After generating all files:
 
 1. List the generated files with a brief description of each.
-2. Call the `AskUserQuestion` tool (do NOT print the question as text):
+2. <HARD-GATE>
+**You MUST ask the user for permission before executing any DDL. Do NOT execute DDL without explicit consent.**
+</HARD-GATE>
+
+   Call the `AskUserQuestion` tool (do NOT print the question as text):
    - Question: "Want me to execute these DDL statements against the database?"
    - Options: "Yes, execute all" / "No, I'll run them manually"
+
+   **STOP and wait for the user's answer. Do NOT execute DDL until the user responds.**
+
    - If yes: execute each file in order (peripherals → bridge → synthetics) using the connection details from the focal context.
    - If no: "Files are ready in `{output_folder}/`. You can run them manually."
 3. Suggest: "You can now use `/daana-query` to query the unified star schema."
