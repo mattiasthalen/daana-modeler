@@ -8,7 +8,12 @@
     {
       "name": "daana-cli",
       "url": "git@github.com:daana-code/daana-cli.git",
-      "commit": "1b9a55be4d69597c5ac2ec375c88c07130da7513"
+      "commit": "c3d510ef8f01ebb7b82e130ef43cb405f989c60b"
+    },
+    {
+      "name": "adventure-works-ddw",
+      "url": "git@github.com:mattiasthalen/adventure-works-ddw.git",
+      "commit": "6d41203eb5bdd46d2a0f2e59a32e6059cb8a2907"
     }
   ]
 }
