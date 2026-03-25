@@ -1,6 +1,6 @@
 ---
 name: daana-focal
-description: Shared Focal foundation — connects to a Focal-based Daana data warehouse and bootstraps metadata into the session context. Invoke as a prerequisite from consumer skills.
+description: Shared Focal foundation — connects to a Focal-based Daana data warehouse and bootstraps metadata into the session context.
 ---
 
 # Daana Focal

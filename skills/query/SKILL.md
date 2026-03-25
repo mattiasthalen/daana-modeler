@@ -1,6 +1,6 @@
 ---
 name: daana-query
-description: Data agent that answers natural language questions about Focal-based Daana data warehouses via live SQL queries.
+description: Data skill that answers natural language questions about Focal-based Daana data warehouses via live SQL queries.
 ---
 
 # Daana Query
