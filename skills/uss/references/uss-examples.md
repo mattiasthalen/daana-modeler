@@ -119,15 +119,15 @@ WITH ranked AS (
             PARTITION BY CUSTOMER_KEY, TYPE_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.CUSTOMER_DESC
+    FROM {source_schema}.CUSTOMER_DESC
     WHERE ROW_ST = 'Y'
 )
 SELECT
     CUSTOMER_KEY,
-    MAX(CASE WHEN TYPE_KEY = 30 THEN VAL_STR END) AS first_name,
-    MAX(CASE WHEN TYPE_KEY = 31 THEN VAL_STR END) AS last_name,
-    MAX(CASE WHEN TYPE_KEY = 32 THEN VAL_STR END) AS email,
-    MAX(CASE WHEN TYPE_KEY = 33 THEN VAL_STR END) AS city
+    MAX(CASE WHEN TYPE_KEY = 30 THEN VAL_STR END) AS customer_first_name,
+    MAX(CASE WHEN TYPE_KEY = 31 THEN VAL_STR END) AS customer_last_name,
+    MAX(CASE WHEN TYPE_KEY = 32 THEN VAL_STR END) AS customer_email,
+    MAX(CASE WHEN TYPE_KEY = 33 THEN VAL_STR END) AS customer_city
 FROM ranked
 WHERE rnk = 1
 GROUP BY CUSTOMER_KEY;
@@ -147,14 +147,14 @@ WITH ranked AS (
             PARTITION BY PRODUCT_KEY, TYPE_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.PRODUCT_DESC
+    FROM {source_schema}.PRODUCT_DESC
     WHERE ROW_ST = 'Y'
 )
 SELECT
     PRODUCT_KEY,
     MAX(CASE WHEN TYPE_KEY = 34 THEN VAL_STR END) AS product_name,
-    MAX(CASE WHEN TYPE_KEY = 35 THEN VAL_STR END) AS category,
-    MAX(CASE WHEN TYPE_KEY = 36 THEN VAL_NUM END) AS list_price
+    MAX(CASE WHEN TYPE_KEY = 35 THEN VAL_STR END) AS product_category,
+    MAX(CASE WHEN TYPE_KEY = 36 THEN VAL_NUM END) AS product_list_price
 FROM ranked
 WHERE rnk = 1
 GROUP BY PRODUCT_KEY;
@@ -175,7 +175,7 @@ WITH ranked AS (
             PARTITION BY ORDER_KEY, TYPE_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.ORDER_DESC
+    FROM {source_schema}.ORDER_DESC
     WHERE ROW_ST = 'Y'
 ),
 order_attrs AS (
@@ -195,7 +195,7 @@ ranked_order_customer_x AS (
             PARTITION BY ORDER_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.ORDER_CUSTOMER_X
+    FROM {source_schema}.ORDER_CUSTOMER_X
     WHERE ROW_ST = 'Y'
       AND TYPE_KEY = 70
 ),
@@ -233,7 +233,7 @@ ranked_order_line AS (
             PARTITION BY ORDER_LINE_KEY, TYPE_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.ORDER_LINE_DESC
+    FROM {source_schema}.ORDER_LINE_DESC
     WHERE ROW_ST = 'Y'
 ),
 order_line_attrs AS (
@@ -258,7 +258,7 @@ ranked_ol_order_x AS (
             PARTITION BY ORDER_LINE_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.ORDER_LINE_ORDER_X
+    FROM {source_schema}.ORDER_LINE_ORDER_X
     WHERE ROW_ST = 'Y'
       AND TYPE_KEY = 50
 ),
@@ -275,7 +275,7 @@ ranked_ol_product_x AS (
             PARTITION BY ORDER_LINE_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.ORDER_LINE_PRODUCT_X
+    FROM {source_schema}.ORDER_LINE_PRODUCT_X
     WHERE ROW_ST = 'Y'
       AND TYPE_KEY = 51
 ),
@@ -297,7 +297,7 @@ ranked_order AS (
             PARTITION BY ORDER_KEY, TYPE_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.ORDER_DESC
+    FROM {source_schema}.ORDER_DESC
     WHERE ROW_ST = 'Y'
 ),
 order_attrs AS (
@@ -321,7 +321,7 @@ ranked_order_customer_x AS (
             PARTITION BY ORDER_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.ORDER_CUSTOMER_X
+    FROM {source_schema}.ORDER_CUSTOMER_X
     WHERE ROW_ST = 'Y'
       AND TYPE_KEY = 70
 ),
@@ -447,7 +447,47 @@ SELECT
     NULL::numeric AS _measure__order_line__unit_price,
     NULL::numeric AS _measure__order_line__quantity,
     NULL::numeric AS _measure__order_line__discount
-FROM order_events oe;
+FROM order_events oe
+
+UNION ALL
+
+-- ============================================================
+-- CUSTOMER: Peripheral bridge rows
+-- ============================================================
+SELECT
+    'customer' AS peripheral,
+    NULL::bigint AS _key__order_line,
+    NULL::bigint AS _key__order,
+    NULL::bigint AS _key__product,
+    c.CUSTOMER_KEY AS _key__customer,
+    NULL AS event,
+    NULL::timestamp AS event_occurred_on,
+    NULL::date AS _key__dates,
+    NULL::time AS _key__times,
+    NULL::numeric AS _measure__order_line__unit_price,
+    NULL::numeric AS _measure__order_line__quantity,
+    NULL::numeric AS _measure__order_line__discount
+FROM uss.customer c
+
+UNION ALL
+
+-- ============================================================
+-- PRODUCT: Peripheral bridge rows
+-- ============================================================
+SELECT
+    'product' AS peripheral,
+    NULL::bigint AS _key__order_line,
+    NULL::bigint AS _key__order,
+    p.PRODUCT_KEY AS _key__product,
+    NULL::bigint AS _key__customer,
+    NULL AS event,
+    NULL::timestamp AS event_occurred_on,
+    NULL::date AS _key__dates,
+    NULL::time AS _key__times,
+    NULL::numeric AS _measure__order_line__unit_price,
+    NULL::numeric AS _measure__order_line__quantity,
+    NULL::numeric AS _measure__order_line__discount
+FROM uss.product p;
 ```
 
 ### How to read this bridge
@@ -469,8 +509,8 @@ SELECT
     b.event_occurred_on,
     d.year,
     d.month_name,
-    c.first_name,
-    c.last_name,
+    c.customer_first_name,
+    c.customer_last_name,
     p.product_name,
     b._measure__order_line__unit_price,
     b._measure__order_line__quantity
@@ -483,6 +523,35 @@ LEFT JOIN uss.order o ON b._key__order = o.ORDER_KEY
 WHERE b.peripheral = 'order_line'
   AND b.event = 'order_placed_on';
 ```
+
+### Historical Mode — Temporal Peripheral Joins
+
+When peripherals are generated in historical mode (`valid_from` / `valid_to`), a simple key join produces duplicates — multiple versions of the peripheral match each bridge row. Use a temporal predicate to resolve the correct version:
+
+**Wrong — produces duplicates:**
+```sql
+-- Multiple valid_from versions per product match → fan-out
+SELECT p.product_name, SUM(b._measure__order_line__unit_price)
+FROM uss._bridge b
+JOIN uss.product p ON b._key__product = p.PRODUCT_KEY
+GROUP BY p.product_name
+```
+
+**Correct — temporal join:**
+```sql
+SELECT p.product_name, SUM(b._measure__order_line__unit_price)
+FROM uss._bridge b
+JOIN uss.product p ON b._key__product = p.PRODUCT_KEY
+    AND p.valid_from <= b.event_occurred_on
+    AND p.valid_to > b.event_occurred_on
+WHERE b.peripheral = 'order_line'
+  AND b.event = 'order_placed_on'
+GROUP BY p.product_name
+```
+
+The temporal predicate `p.valid_from <= b.event_occurred_on AND p.valid_to > b.event_occurred_on` resolves exactly one version of each peripheral row per bridge row.
+
+> **Note:** This only applies when peripherals are historical. Snapshot peripherals have one row per entity key and don't need temporal predicates.
 
 ## 6. Generated Synthetic SQL
 
@@ -577,7 +646,7 @@ ranked_order_line AS (
             PARTITION BY ORDER_LINE_KEY, TYPE_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.ORDER_LINE_DESC
+    FROM {source_schema}.ORDER_LINE_DESC
     WHERE ROW_ST = 'Y'
 ),
 order_line_attrs AS (
@@ -594,7 +663,7 @@ ranked_ol_order_x AS (
     SELECT
         ORDER_LINE_KEY, ORDER_KEY,
         RANK() OVER (PARTITION BY ORDER_LINE_KEY ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC) AS rnk
-    FROM daana_dw.ORDER_LINE_ORDER_X
+    FROM {source_schema}.ORDER_LINE_ORDER_X
     WHERE ROW_ST = 'Y' AND TYPE_KEY = 50
 ),
 rel_ol_order AS (
@@ -604,7 +673,7 @@ ranked_ol_product_x AS (
     SELECT
         ORDER_LINE_KEY, PRODUCT_KEY,
         RANK() OVER (PARTITION BY ORDER_LINE_KEY ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC) AS rnk
-    FROM daana_dw.ORDER_LINE_PRODUCT_X
+    FROM {source_schema}.ORDER_LINE_PRODUCT_X
     WHERE ROW_ST = 'Y' AND TYPE_KEY = 51
 ),
 rel_ol_product AS (
@@ -614,7 +683,7 @@ ranked_order AS (
     SELECT
         ORDER_KEY, TYPE_KEY, STA_TMSTP,
         RANK() OVER (PARTITION BY ORDER_KEY, TYPE_KEY ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC) AS rnk
-    FROM daana_dw.ORDER_DESC
+    FROM {source_schema}.ORDER_DESC
     WHERE ROW_ST = 'Y'
 ),
 order_attrs AS (
@@ -630,7 +699,7 @@ ranked_order_customer_x AS (
     SELECT
         ORDER_KEY, CUSTOMER_KEY,
         RANK() OVER (PARTITION BY ORDER_KEY ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC) AS rnk
-    FROM daana_dw.ORDER_CUSTOMER_X
+    FROM {source_schema}.ORDER_CUSTOMER_X
     WHERE ROW_ST = 'Y' AND TYPE_KEY = 70
 ),
 rel_order_customer AS (
@@ -700,8 +769,8 @@ Without event unpivoting, consumers filter on specific timestamp columns:
 SELECT
     b.order_placed_on,
     b.order_required_by,
-    c.first_name,
-    c.last_name,
+    c.customer_first_name,
+    c.customer_last_name,
     p.product_name,
     b._measure__order_line__unit_price
 FROM uss._bridge b
@@ -731,7 +800,7 @@ ranked_order_line AS (
             PARTITION BY ORDER_LINE_KEY, TYPE_KEY, EFF_TMSTP
             ORDER BY VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.ORDER_LINE_DESC
+    FROM {source_schema}.ORDER_LINE_DESC
     -- No ROW_ST filter — keep all versions
 ),
 order_line_attrs AS (
@@ -762,7 +831,7 @@ ranked_ol_order_x AS (
             PARTITION BY ORDER_LINE_KEY, EFF_TMSTP
             ORDER BY VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.ORDER_LINE_ORDER_X
+    FROM {source_schema}.ORDER_LINE_ORDER_X
       AND TYPE_KEY = 50
     -- No ROW_ST filter
 ),
@@ -838,7 +907,7 @@ SELECT
     b.event_occurred_on,
     b.valid_from,
     b.valid_to,
-    c.first_name,
+    c.customer_first_name,
     b._measure__order_line__unit_price
 FROM uss._bridge b
 LEFT JOIN uss.customer c ON b._key__customer = c.CUSTOMER_KEY
