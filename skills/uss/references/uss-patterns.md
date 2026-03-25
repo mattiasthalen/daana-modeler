@@ -15,6 +15,8 @@ The bootstrap data from `f_focal_read()` must be available in context. Each boot
 | `attribute_name` | Logical attribute name within the atomic context |
 | `table_pattern_column_name` | Physical column: `VAL_STR`, `VAL_NUM`, `STA_TMSTP`, `END_TMSTP`, `UOM`, `FOCAL01_KEY`, `FOCAL02_KEY` |
 
+> **CRITICAL:** The source schema for all SQL is the `FOCAL_PHYSICAL_SCHEMA` value from the bootstrap (e.g., `daana_dw`). Use `{source_schema}` in all `FROM` clauses. **Never** hardcode `daana_dw` or use `focal` as a schema name.
+
 ## RANK Dedup Pattern (Base)
 
 All USS patterns use the RANK window function to resolve the latest version of each row. This is the foundational CTE used throughout.
@@ -27,7 +29,7 @@ WITH ranked AS (
             PARTITION BY {entity}_KEY, TYPE_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.{table}
+    FROM {source_schema}.{table}
     WHERE ROW_ST = 'Y'
 ),
 deduped AS (
@@ -65,7 +67,7 @@ WITH ranked AS (
             PARTITION BY {entity}_KEY, TYPE_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.{descriptor_table}
+    FROM {source_schema}.{descriptor_table}
     WHERE ROW_ST = 'Y'
 )
 SELECT
@@ -78,7 +80,25 @@ WHERE rnk = 1
 GROUP BY {entity}_KEY
 ```
 
-The `{column_N}` values come from `table_pattern_column_name` in the bootstrap (e.g., `VAL_STR`, `VAL_NUM`, `STA_TMSTP`). The `{key_N}` values come from `atom_contx_key`. The `{attr_name_N}` values are derived from `atomic_context_name` — lowercased, with the entity prefix stripped.
+The `{column_N}` values come from `table_pattern_column_name` in the bootstrap (e.g., `VAL_STR`, `VAL_NUM`, `STA_TMSTP`). The `{key_N}` values come from `atom_contx_key`. The `{attr_name_N}` values are derived from `atomic_context_name` using this algorithm:
+
+1. Take the `atomic_context_name` (e.g., `PRODUCT_PRODUCT_NAME`)
+2. Identify the entity name — the `focal_name` without the `_FOCAL` suffix (e.g., `PRODUCT`)
+3. Strip exactly one leading `{ENTITY}_` prefix (e.g., `PRODUCT_PRODUCT_NAME` → `PRODUCT_NAME`)
+4. Lowercase the result → `product_name`
+
+**Examples:**
+
+| `atomic_context_name` | Entity | Strip prefix | Result |
+|---|---|---|---|
+| `PRODUCT_PRODUCT_NAME` | PRODUCT | `PRODUCT_NAME` | `product_name` |
+| `PRODUCT_PRODUCT_LIST_PRICE` | PRODUCT | `PRODUCT_LIST_PRICE` | `product_list_price` |
+| `STORE_STORE_NAME` | STORE | `STORE_NAME` | `store_name` |
+| `CUSTOMER_CUSTOMER_FIRST_NAME` | CUSTOMER | `CUSTOMER_FIRST_NAME` | `customer_first_name` |
+| `CUSTOMER_CUSTOMER_CITY` | CUSTOMER | `CUSTOMER_CITY` | `customer_city` |
+| `ORDER_LINE_UNIT_PRICE` | ORDER_LINE | `UNIT_PRICE` | `unit_price` |
+
+> **CRITICAL:** Strip only ONE leading `{ENTITY}_` prefix. Do NOT strip recursively. `PRODUCT_PRODUCT_NAME` → `product_name`, never `name`.
 
 ### Multiple Descriptor Tables
 
@@ -98,7 +118,7 @@ WITH ranked_desc AS (
             PARTITION BY {entity}_KEY, TYPE_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.{descriptor_table_1}
+    FROM {source_schema}.{descriptor_table_1}
     WHERE ROW_ST = 'Y'
 ),
 desc_pivoted AS (
@@ -120,7 +140,7 @@ ranked_desc2 AS (
             PARTITION BY {entity}_KEY, TYPE_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.{descriptor_table_2}
+    FROM {source_schema}.{descriptor_table_2}
     WHERE ROW_ST = 'Y'
 ),
 desc2_pivoted AS (
@@ -164,15 +184,15 @@ WITH ranked AS (
             PARTITION BY CUSTOMER_KEY, TYPE_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.CUSTOMER_DESC
+    FROM {source_schema}.CUSTOMER_DESC
     WHERE ROW_ST = 'Y'
 )
 SELECT
     CUSTOMER_KEY,
-    MAX(CASE WHEN TYPE_KEY = 30 THEN VAL_STR END) AS first_name,
-    MAX(CASE WHEN TYPE_KEY = 31 THEN VAL_STR END) AS last_name,
-    MAX(CASE WHEN TYPE_KEY = 32 THEN VAL_STR END) AS email,
-    MAX(CASE WHEN TYPE_KEY = 33 THEN VAL_STR END) AS city
+    MAX(CASE WHEN TYPE_KEY = 30 THEN VAL_STR END) AS customer_first_name,
+    MAX(CASE WHEN TYPE_KEY = 31 THEN VAL_STR END) AS customer_last_name,
+    MAX(CASE WHEN TYPE_KEY = 32 THEN VAL_STR END) AS customer_email,
+    MAX(CASE WHEN TYPE_KEY = 33 THEN VAL_STR END) AS customer_city
 FROM ranked
 WHERE rnk = 1
 GROUP BY CUSTOMER_KEY
@@ -180,7 +200,7 @@ GROUP BY CUSTOMER_KEY
 
 ## Bridge Pattern — Event-Grain, Snapshot
 
-The bridge UNION ALLs fact rows from multiple entities. Each entity contributes:
+The bridge UNION ALLs rows from **ALL entities** — both bridge sources and peripherals. Every entity in the USS participates in the bridge, making each entity both a fact (contributing rows) and a dimension (joinable via FK). Each entity contributes:
 1. Resolved descriptor attributes (measures via RANK + pivot)
 2. Resolved relationship keys (M:1 only, via RANK on relationship tables)
 3. Unpivoted timestamps into `event` + `event_occurred_on`
@@ -202,7 +222,7 @@ ranked_{entity} AS (
             PARTITION BY {entity}_KEY, TYPE_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.{entity}_DESC
+    FROM {source_schema}.{entity}_DESC
     WHERE ROW_ST = 'Y'
 ),
 {entity}_attrs AS (
@@ -222,7 +242,16 @@ ranked_{entity} AS (
 
 For each relationship table connecting a bridge source to a peripheral, create a RANK CTE. The `FOCAL01_KEY` side is the many (bridge source), the `FOCAL02_KEY` side is the one (peripheral).
 
-**Important:** In relationship tables, `FOCAL01_KEY` and `FOCAL02_KEY` are pattern names from the bootstrap — the actual physical column names are the `attribute_name` values. For example, if the bootstrap shows `attribute_name = ORDER_LINE_KEY` with `table_pattern_column_name = FOCAL01_KEY`, then `ORDER_LINE_KEY` is the real column name.
+> **CRITICAL — FOCAL01_KEY / FOCAL02_KEY ARE NOT COLUMN NAMES**
+>
+> In relationship tables, `FOCAL01_KEY` and `FOCAL02_KEY` are **pattern indicators** from the bootstrap, NOT physical column names. The actual column names are the `attribute_name` values:
+>
+> | Bootstrap `table_pattern_column_name` | Bootstrap `attribute_name` | Use in SQL |
+> |---|---|---|
+> | `FOCAL01_KEY` | `ORDER_LINE_KEY` | `SELECT ORDER_LINE_KEY FROM ...` |
+> | `FOCAL02_KEY` | `ORDER_KEY` | `SELECT ORDER_KEY FROM ...` |
+>
+> **NEVER write `SELECT FOCAL01_KEY` or `SELECT FOCAL02_KEY`** — these columns do not exist in physical tables.
 
 ```sql
 ranked_{rel_table} AS (
@@ -233,7 +262,7 @@ ranked_{rel_table} AS (
             PARTITION BY {source_attr_name}
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.{relationship_table}
+    FROM {source_schema}.{relationship_table}
     WHERE ROW_ST = 'Y'
       AND TYPE_KEY = {rel_type_key}
 ),
@@ -310,7 +339,7 @@ Derive join keys from the event timestamp:
 
 ### Step 5: UNION ALL Across Entities
 
-Combine all entity event CTEs into the final bridge. Add a `peripheral` column to identify the source entity. NULL-pad measures that don't exist in a given entity.
+Combine **ALL entity** CTEs (bridge sources AND peripherals) into the final bridge via UNION ALL. Every entity contributes rows — bridge sources contribute their measures and timestamps, peripherals contribute their entity key (with NULL measures/timestamps). Add a `peripheral` column to identify the source entity. NULL-pad columns that don't exist in a given entity.
 
 ```sql
 SELECT
@@ -388,7 +417,7 @@ ranked_order_line AS (
             PARTITION BY ORDER_LINE_KEY, TYPE_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.ORDER_LINE_DESC
+    FROM {source_schema}.ORDER_LINE_DESC
     WHERE ROW_ST = 'Y'
 ),
 order_line_attrs AS (
@@ -413,7 +442,7 @@ ranked_order_line_order_x AS (
             PARTITION BY ORDER_LINE_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.ORDER_LINE_ORDER_X
+    FROM {source_schema}.ORDER_LINE_ORDER_X
     WHERE ROW_ST = 'Y'
       AND TYPE_KEY = 50
 ),
@@ -430,7 +459,7 @@ ranked_order_line_product_x AS (
             PARTITION BY ORDER_LINE_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.ORDER_LINE_PRODUCT_X
+    FROM {source_schema}.ORDER_LINE_PRODUCT_X
     WHERE ROW_ST = 'Y'
       AND TYPE_KEY = 51
 ),
@@ -470,7 +499,7 @@ ranked_order AS (
             PARTITION BY ORDER_KEY, TYPE_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.ORDER_DESC
+    FROM {source_schema}.ORDER_DESC
     WHERE ROW_ST = 'Y'
 ),
 order_attrs AS (
@@ -494,7 +523,7 @@ ranked_order_customer_x AS (
             PARTITION BY ORDER_KEY
             ORDER BY EFF_TMSTP DESC, VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.ORDER_CUSTOMER_X
+    FROM {source_schema}.ORDER_CUSTOMER_X
     WHERE ROW_ST = 'Y'
       AND TYPE_KEY = 70
 ),
@@ -645,7 +674,7 @@ ranked_{entity} AS (
             PARTITION BY {entity}_KEY, TYPE_KEY, EFF_TMSTP
             ORDER BY VER_TMSTP DESC
         ) AS rnk
-    FROM daana_dw.{entity}_DESC
+    FROM {source_schema}.{entity}_DESC
     -- No ROW_ST filter — include all rows to track deletions
 )
 ```
@@ -674,6 +703,25 @@ Use `LEAD` window function to compute `valid_to` from the next row's `EFF_TMSTP`
     FROM {entity}_joined
 )
 ```
+
+### 2a. Temporal Peripheral FK Keys
+
+When historical mode is selected, the bridge's FK to each peripheral must include the peripheral's `valid_from` so consumers can perform point-in-time joins. For each peripheral FK column `_key__{peripheral}`, also include `_valid_from__{peripheral}`:
+
+```sql
+-- In the bridge output, for each temporal peripheral:
+_key__{peripheral},
+_valid_from__{peripheral},   -- peripheral's valid_from for point-in-time join
+```
+
+This enables the consumer join pattern:
+
+```sql
+JOIN uss.product p ON b._key__product = p.PRODUCT_KEY
+    AND b._valid_from__product = p.valid_from
+```
+
+> **Note:** Only add `_valid_from__{peripheral}` columns when historical mode is selected. In snapshot mode, there is only one version per entity key, so the simple FK join is sufficient.
 
 ### 3. Include ROW_ST in output for deletion tracking
 
@@ -899,6 +947,55 @@ When a bridge source entity (e.g., ORDER_LINE) has a M:1 relationship to another
 
 This is implemented in the `order_line_with_order` CTE in the complete example above — join through intermediate entities to resolve the full chain.
 
+### Recursive Peripheral Discovery
+
+The USS requires **every entity reachable via M:1 chains** to be included — both as a peripheral (joinable dimension) and as a bridge participant (contributing rows). Use this algorithm to discover all peripherals:
+
+**Algorithm:**
+
+1. **Initialize** — Start with the set of bridge source entities selected by the user.
+2. **Collect direct M:1 targets** — For each entity in the working set, find all relationship tables where it appears on the `FOCAL01_KEY` side. The `FOCAL02_KEY` entity is a peripheral. Add it to the peripheral set.
+3. **Recurse** — For each newly discovered peripheral, repeat step 2. Check if the peripheral has its own M:1 relationships (i.e., it appears on the `FOCAL01_KEY` side of other relationship tables). If yes, add the targets to the peripheral set.
+4. **Terminate** — Stop when no new entities are discovered.
+5. **Result** — The peripheral set contains ALL entities that should be generated as peripheral SQL files AND included in the bridge UNION ALL.
+
+**Example — Adventure Works:**
+
+Starting bridge sources: `SALES_ORDER_DETAIL`, `SALES_ORDER`, `PURCHASE_ORDER`, `WORK_ORDER`
+
+| Iteration | Entity examined | M:1 targets found | New peripherals |
+|---|---|---|---|
+| 1 | SALES_ORDER_DETAIL | SALES_ORDER, PRODUCT, SPECIAL_OFFER | PRODUCT, SPECIAL_OFFER |
+| 1 | SALES_ORDER | CUSTOMER, SALES_PERSON, SALES_TERRITORY, ADDRESS | CUSTOMER, SALES_PERSON, SALES_TERRITORY, ADDRESS |
+| 1 | PURCHASE_ORDER | EMPLOYEE, VENDOR | EMPLOYEE, VENDOR |
+| 1 | WORK_ORDER | PRODUCT | (already found) |
+| 2 | PRODUCT | (no M:1 relationships) | — |
+| 2 | SPECIAL_OFFER | (no M:1 relationships) | — |
+| 2 | CUSTOMER | PERSON, SALES_TERRITORY, STORE | PERSON, STORE |
+| 2 | SALES_PERSON | EMPLOYEE, SALES_TERRITORY | (already found) |
+| 2 | SALES_TERRITORY | (no M:1 relationships) | — |
+| 2 | ADDRESS | (no M:1 relationships) | — |
+| 2 | EMPLOYEE | PERSON | (already found) |
+| 2 | VENDOR | PERSON | (already found) |
+| 3 | PERSON | (no M:1 relationships) | — |
+| 3 | STORE | SALES_PERSON | (already found) |
+
+**Final peripheral set:** PRODUCT, SPECIAL_OFFER, CUSTOMER, SALES_PERSON, SALES_TERRITORY, ADDRESS, EMPLOYEE, VENDOR, PERSON, STORE
+
+**All entities in bridge UNION ALL:** SALES_ORDER_DETAIL, SALES_ORDER, PURCHASE_ORDER, WORK_ORDER, PRODUCT, SPECIAL_OFFER, CUSTOMER, SALES_PERSON, SALES_TERRITORY, ADDRESS, EMPLOYEE, VENDOR, PERSON, STORE
+
+### Peripheral Bridge Rows
+
+Peripheral entities contribute rows to the bridge just like bridge sources, but they typically have no measures or timestamps. Their bridge rows contain:
+
+- `peripheral` = entity name (e.g., `'customer'`)
+- `_key__{entity}` = entity key (e.g., `CUSTOMER_KEY`)
+- All other `_key__*` columns = their own M:1 relationship targets (e.g., `_key__person`, `_key__store`) or NULL
+- All `_measure__*` columns = NULL
+- `event` / `event_occurred_on` / `_key__dates` / `_key__times` = NULL (unless the peripheral has timestamps)
+
+This means consumers can query `WHERE peripheral = 'customer'` to get one row per customer with all their relationship keys resolved — enabling customer-centric analysis without joining through the bridge sources.
+
 ## DDL Wrapping
 
 ### View
@@ -918,3 +1015,39 @@ CREATE TABLE {schema}.{name} AS
 ```
 
 The `{schema}` is determined from the user's connection profile or asked during the interview. The `{name}` follows the file naming conventions (e.g., `customer`, `_bridge`, `_dates`, `_times`).
+
+## Common Mistakes
+
+### Mistake 1: Using FOCAL01_KEY / FOCAL02_KEY as column names
+
+**Wrong:**
+```sql
+SELECT FOCAL01_KEY, FOCAL02_KEY FROM {source_schema}.ORDER_LINE_ORDER_X
+```
+
+**Correct:**
+```sql
+-- Use attribute_name from bootstrap, not table_pattern_column_name
+SELECT ORDER_LINE_KEY, ORDER_KEY FROM {source_schema}.ORDER_LINE_ORDER_X
+```
+
+The bootstrap's `table_pattern_column_name` tells you the ROLE (`FOCAL01_KEY` = many side, `FOCAL02_KEY` = one side). The `attribute_name` tells you the ACTUAL COLUMN NAME.
+
+### Mistake 2: Using wrong schema name
+
+**Wrong:**
+```sql
+SELECT * FROM focal.CUSTOMER_DESC
+```
+
+**Correct:**
+```sql
+-- Use FOCAL_PHYSICAL_SCHEMA from bootstrap
+SELECT * FROM {source_schema}.CUSTOMER_DESC
+```
+
+### Mistake 3: Over-stripping column names
+
+**Wrong:** `PRODUCT_PRODUCT_NAME` → `name`
+
+**Correct:** `PRODUCT_PRODUCT_NAME` → `product_name` (strip entity prefix exactly once)
