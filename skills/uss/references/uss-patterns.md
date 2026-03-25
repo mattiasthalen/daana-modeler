@@ -200,7 +200,7 @@ GROUP BY CUSTOMER_KEY
 
 ## Bridge Pattern — Event-Grain, Snapshot
 
-The bridge UNION ALLs fact rows from multiple entities. Each entity contributes:
+The bridge UNION ALLs rows from **ALL entities** — both bridge sources and peripherals. Every entity in the USS participates in the bridge, making each entity both a fact (contributing rows) and a dimension (joinable via FK). Each entity contributes:
 1. Resolved descriptor attributes (measures via RANK + pivot)
 2. Resolved relationship keys (M:1 only, via RANK on relationship tables)
 3. Unpivoted timestamps into `event` + `event_occurred_on`
@@ -339,7 +339,7 @@ Derive join keys from the event timestamp:
 
 ### Step 5: UNION ALL Across Entities
 
-Combine all entity event CTEs into the final bridge. Add a `peripheral` column to identify the source entity. NULL-pad measures that don't exist in a given entity.
+Combine **ALL entity** CTEs (bridge sources AND peripherals) into the final bridge via UNION ALL. Every entity contributes rows — bridge sources contribute their measures and timestamps, peripherals contribute their entity key (with NULL measures/timestamps). Add a `peripheral` column to identify the source entity. NULL-pad columns that don't exist in a given entity.
 
 ```sql
 SELECT
@@ -927,6 +927,52 @@ When a bridge source entity (e.g., ORDER_LINE) has a M:1 relationship to another
 3. Both ORDER_KEY and CUSTOMER_KEY appear as FK columns in ORDER_LINE's bridge rows
 
 This is implemented in the `order_line_with_order` CTE in the complete example above — join through intermediate entities to resolve the full chain.
+
+### Recursive Peripheral Discovery
+
+The USS requires **every entity reachable via M:1 chains** to be included — both as a peripheral (joinable dimension) and as a bridge participant (contributing rows). Use this algorithm to discover all peripherals:
+
+**Algorithm:**
+
+1. **Initialize** — Start with the set of bridge source entities selected by the user.
+2. **Collect direct M:1 targets** — For each entity in the working set, find all relationship tables where it appears on the `FOCAL01_KEY` side. The `FOCAL02_KEY` entity is a peripheral. Add it to the peripheral set.
+3. **Recurse** — For each newly discovered peripheral, repeat step 2. Check if the peripheral has its own M:1 relationships (i.e., it appears on the `FOCAL01_KEY` side of other relationship tables). If yes, add the targets to the peripheral set.
+4. **Terminate** — Stop when no new entities are discovered.
+5. **Result** — The peripheral set contains ALL entities that should be generated as peripheral SQL files AND included in the bridge UNION ALL.
+
+**Example — Adventure Works:**
+
+Starting bridge sources: `SALES_ORDER_DETAIL`, `SALES_ORDER`, `PURCHASE_ORDER`, `WORK_ORDER`
+
+| Iteration | Entity examined | M:1 targets found | New peripherals |
+|---|---|---|---|
+| 1 | SALES_ORDER_DETAIL | SALES_ORDER, SPECIAL_OFFER, PRODUCT | SPECIAL_OFFER, PRODUCT |
+| 1 | SALES_ORDER | CUSTOMER, SALES_PERSON, SALES_TERRITORY | CUSTOMER, SALES_PERSON, SALES_TERRITORY |
+| 1 | PURCHASE_ORDER | VENDOR, EMPLOYEE | VENDOR, EMPLOYEE |
+| 1 | WORK_ORDER | PRODUCT | (already found) |
+| 2 | CUSTOMER | PERSON, STORE, SALES_TERRITORY | PERSON, STORE |
+| 2 | SALES_PERSON | EMPLOYEE | (already found) |
+| 2 | EMPLOYEE | DEPARTMENT | DEPARTMENT |
+| 2 | STORE | SALES_PERSON | (already found) |
+| 2 | PERSON | ADDRESS | ADDRESS |
+| 3 | ADDRESS | (no M:1 relationships) | — |
+| 3 | DEPARTMENT | (no M:1 relationships) | — |
+
+**Final peripheral set:** SPECIAL_OFFER, PRODUCT, CUSTOMER, SALES_PERSON, SALES_TERRITORY, VENDOR, EMPLOYEE, PERSON, STORE, DEPARTMENT, ADDRESS
+
+**All entities in bridge UNION ALL:** SALES_ORDER_DETAIL, SALES_ORDER, PURCHASE_ORDER, WORK_ORDER, SPECIAL_OFFER, PRODUCT, CUSTOMER, SALES_PERSON, SALES_TERRITORY, VENDOR, EMPLOYEE, PERSON, STORE, DEPARTMENT, ADDRESS
+
+### Peripheral Bridge Rows
+
+Peripheral entities contribute rows to the bridge just like bridge sources, but they typically have no measures or timestamps. Their bridge rows contain:
+
+- `peripheral` = entity name (e.g., `'customer'`)
+- `_key__{entity}` = entity key (e.g., `CUSTOMER_KEY`)
+- All other `_key__*` columns = their own M:1 relationship targets (e.g., `_key__person`, `_key__store`) or NULL
+- All `_measure__*` columns = NULL
+- `event` / `event_occurred_on` / `_key__dates` / `_key__times` = NULL (unless the peripheral has timestamps)
+
+This means consumers can query `WHERE peripheral = 'customer'` to get one row per customer with all their relationship keys resolved — enabling customer-centric analysis without joining through the bridge sources.
 
 ## DDL Wrapping
 
