@@ -78,7 +78,25 @@ WHERE rnk = 1
 GROUP BY {entity}_KEY
 ```
 
-The `{column_N}` values come from `table_pattern_column_name` in the bootstrap (e.g., `VAL_STR`, `VAL_NUM`, `STA_TMSTP`). The `{key_N}` values come from `atom_contx_key`. The `{attr_name_N}` values are derived from `atomic_context_name` — lowercased, with the entity prefix stripped.
+The `{column_N}` values come from `table_pattern_column_name` in the bootstrap (e.g., `VAL_STR`, `VAL_NUM`, `STA_TMSTP`). The `{key_N}` values come from `atom_contx_key`. The `{attr_name_N}` values are derived from `atomic_context_name` using this algorithm:
+
+1. Take the `atomic_context_name` (e.g., `PRODUCT_PRODUCT_NAME`)
+2. Identify the entity name — the `focal_name` without the `_FOCAL` suffix (e.g., `PRODUCT`)
+3. Strip exactly one leading `{ENTITY}_` prefix (e.g., `PRODUCT_PRODUCT_NAME` → `PRODUCT_NAME`)
+4. Lowercase the result → `product_name`
+
+**Examples:**
+
+| `atomic_context_name` | Entity | Strip prefix | Result |
+|---|---|---|---|
+| `PRODUCT_PRODUCT_NAME` | PRODUCT | `PRODUCT_NAME` | `product_name` |
+| `PRODUCT_PRODUCT_LIST_PRICE` | PRODUCT | `PRODUCT_LIST_PRICE` | `product_list_price` |
+| `STORE_STORE_NAME` | STORE | `STORE_NAME` | `store_name` |
+| `CUSTOMER_CUSTOMER_FIRST_NAME` | CUSTOMER | `CUSTOMER_FIRST_NAME` | `customer_first_name` |
+| `CUSTOMER_CUSTOMER_CITY` | CUSTOMER | `CUSTOMER_CITY` | `customer_city` |
+| `ORDER_LINE_UNIT_PRICE` | ORDER_LINE | `UNIT_PRICE` | `unit_price` |
+
+> **CRITICAL:** Strip only ONE leading `{ENTITY}_` prefix. Do NOT strip recursively. `PRODUCT_PRODUCT_NAME` → `product_name`, never `name`.
 
 ### Multiple Descriptor Tables
 
@@ -169,10 +187,10 @@ WITH ranked AS (
 )
 SELECT
     CUSTOMER_KEY,
-    MAX(CASE WHEN TYPE_KEY = 30 THEN VAL_STR END) AS first_name,
-    MAX(CASE WHEN TYPE_KEY = 31 THEN VAL_STR END) AS last_name,
-    MAX(CASE WHEN TYPE_KEY = 32 THEN VAL_STR END) AS email,
-    MAX(CASE WHEN TYPE_KEY = 33 THEN VAL_STR END) AS city
+    MAX(CASE WHEN TYPE_KEY = 30 THEN VAL_STR END) AS customer_first_name,
+    MAX(CASE WHEN TYPE_KEY = 31 THEN VAL_STR END) AS customer_last_name,
+    MAX(CASE WHEN TYPE_KEY = 32 THEN VAL_STR END) AS customer_email,
+    MAX(CASE WHEN TYPE_KEY = 33 THEN VAL_STR END) AS customer_city
 FROM ranked
 WHERE rnk = 1
 GROUP BY CUSTOMER_KEY
